@@ -27,5 +27,5 @@ if image.mode == 'RGB':
     image = rembg(image)
 
 image = image_path
-mesh = pipeline_shapegen(image=image)[0]
+mesh = pipeline_shapegen(image=image, guidance_scale=15.0)[0]
 mesh.export('demo.glb')

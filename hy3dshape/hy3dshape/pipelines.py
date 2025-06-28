@@ -2,8 +2,7 @@
 # except for the third-party components listed below.
 # Hunyuan 3D does not impose any additional limitations beyond what is outlined
 # in the repsective licenses of these third-party components.
-# Users must comply with all terms and conditions of original licenses of these third-party
-# components and must ensure that the usage of the third party components adheres to
+# Users must comply with all terms and conditions of original licenses of these third-party components and must ensure that the usage of the third party components adheres to
 # all relevant laws and regulations.
 
 # For avoidance of doubts, Hunyuan 3D means the large language models and
@@ -217,6 +216,7 @@ class Hunyuan3DDiTPipeline:
             use_safetensors=use_safetensors,
             variant=variant
         )
+        print("Config path:", config_path)
         return cls.from_single_file(
             ckpt_path,
             config_path,
@@ -483,6 +483,8 @@ class Hunyuan3DDiTPipeline:
             latents = latents.to(device)
 
         # scale the initial noise by the standard deviation required by the scheduler
+        # todo
+        # Init noise sigma smaller seems to work well....
         latents = latents * getattr(self.scheduler, 'init_noise_sigma', 1.0)
         return latents
 
@@ -572,6 +574,7 @@ class Hunyuan3DDiTPipeline:
         num_chunks=8000,
         mc_algo=None,
         output_type: Optional[str] = "trimesh",
+        extra_cond_tok=None,
         enable_pbar=True,
         **kwargs,
     ) -> List[List[trimesh.Trimesh]]:
@@ -598,6 +601,10 @@ class Hunyuan3DDiTPipeline:
             do_classifier_free_guidance=do_classifier_free_guidance,
             dual_guidance=False,
         )
+        if extra_cond_tok is not None:
+            zero_cond = torch.zeros(1,1,cond["main"].shape[-1], dtype=cond["main"].dtype, device=cond["main"].device)
+            extra_cond_tok = torch.cat([zero_cond, extra_cond_tok], dim=0)
+            cond["main"] = torch.cat([cond["main"], extra_cond_tok], dim=1)
         batch_size = image.shape[0]
 
         t_dtype = torch.long
@@ -668,6 +675,8 @@ class Hunyuan3DDiTPipeline:
     ):
         if not output_type == "latent":
             latents = 1. / self.vae.scale_factor * latents
+            # Save latents to file
+            torch.save(latents, 'latents_after_diffusion.pt')
             latents = self.vae(latents)
             outputs = self.vae.latents2mesh(
                 latents,
@@ -685,30 +694,79 @@ class Hunyuan3DDiTPipeline:
             outputs = export_to_trimesh(outputs)
 
         return outputs
+    
+
+import torch
+class MomentumBuffer:
+    def __init__(self, momentum: float):
+        self.momentum = momentum
+        self.running_average = 0
+    def update(self, update_value: torch.Tensor):
+        new_average = self.momentum * self.running_average
+        self.running_average = update_value + new_average
+def project(
+    v0: torch.Tensor, # [B, C, H, W]
+    v1: torch.Tensor, # [B, C, H, W]
+  ):
+        dtype = v0.dtype
+        v0, v1 = v0.double(), v1.double()
+        v1 = torch.nn.functional.normalize(v1, dim=[-1, -2, -3])
+        v0_parallel = (v0 * v1).sum(dim=[-1, -2, -3], keepdim=True) * v1
+        v0_orthogonal = v0 - v0_parallel
+        return v0_parallel.to(dtype), v0_orthogonal.to(dtype)
+def adaptive_projected_guidance(
+    pred_cond: torch.Tensor, # [B, C, H, W]
+    pred_uncond: torch.Tensor, # [B, C, H, W]
+    guidance_scale: float,
+    momentum_buffer: MomentumBuffer = None,
+    eta: float = 1.0,
+    norm_threshold: float = 0.0,
+):
+    diff = pred_cond - pred_uncond
+    if momentum_buffer is not None:
+        momentum_buffer.update(diff)
+        diff = momentum_buffer.running_average
+    if norm_threshold > 0:
+        ones = torch.ones_like(diff)
+        diff_norm = diff.norm(p=2, dim=[-1, -2, -3], keepdim=True)
+        scale_factor = torch.minimum(ones, norm_threshold / diff_norm)
+        diff = diff * scale_factor
+    diff_parallel, diff_orthogonal = project(diff, pred_cond)
+    normalized_update = diff_orthogonal + eta * diff_parallel
+    pred_guided = pred_cond + (guidance_scale - 1) * normalized_update
+    return pred_guided
+
+import math
+def get_guidance_scale(t_frac, w_min=1.0, w_max=5.0):
+    # t_frac = current step index / total steps ∈ [0,1]
+    # e.g. ramp up to w_max in the middle, then ramp down
+    return w_min + (w_max - w_min) * math.sin(math.pi * t_frac)
+
 
 
 class Hunyuan3DDiTFlowMatchingPipeline(Hunyuan3DDiTPipeline):
-
-    @torch.inference_mode()
+    # allow gradients for classifier‐based guidance
     def __call__(
-        self,
-        image: Union[str, List[str], Image.Image, dict, List[dict], torch.Tensor] = None,
-        num_inference_steps: int = 50,
-        timesteps: List[int] = None,
-        sigmas: List[float] = None,
-        eta: float = 0.0,
-        guidance_scale: float = 5.0,
-        generator=None,
-        box_v=1.01,
-        octree_resolution=384,
-        mc_level=0.0,
-        mc_algo=None,
-        num_chunks=8000,
-        output_type: Optional[str] = "trimesh",
-        enable_pbar=True,
-        mask = None,
+         self,
+         image: Union[str, List[str], Image.Image, dict, List[dict], torch.Tensor] = None,
+         num_inference_steps: int = 50,
+         timesteps: List[int] = None,
+         sigmas: List[float] = None,
+         eta: float = 0.0,
+         guidance_scale: float = 15.0,
+         generator=None,
+         box_v=1.01,
+         octree_resolution=384,
+         mc_level=0.0,
+         mc_algo=None,
+         num_chunks=8000,
+         output_type: Optional[str] = "trimesh",
+         enable_pbar=True,
+         mask=None,
+         classifier_scale: float = 1.0,          # <--- new
         **kwargs,
     ) -> List[List[trimesh.Trimesh]]:
+        #guidance_scale = 10.0
         callback = kwargs.pop("callback", None)
         callback_steps = kwargs.pop("callback_steps", None)
 
@@ -716,12 +774,7 @@ class Hunyuan3DDiTFlowMatchingPipeline(Hunyuan3DDiTPipeline):
 
         device = self.device
         dtype = self.dtype
-        do_classifier_free_guidance = guidance_scale >= 0 and not (
-            hasattr(self.model, 'guidance_embed') and
-            self.model.guidance_embed is True
-        )
-
-        # print('image', type(image), 'mask', type(mask))
+        do_classifier_free_guidance = True 
         cond_inputs = self.prepare_image(image, mask)
         image = cond_inputs.pop('image')
         cond = self.encode_cond(
@@ -730,6 +783,7 @@ class Hunyuan3DDiTFlowMatchingPipeline(Hunyuan3DDiTPipeline):
             do_classifier_free_guidance=do_classifier_free_guidance,
             dual_guidance=False,
         )
+        print("Cond shape:", {k: v.shape for k, v in cond.items()})
 
         batch_size = image.shape[0]
 
@@ -743,6 +797,7 @@ class Hunyuan3DDiTFlowMatchingPipeline(Hunyuan3DDiTPipeline):
             sigmas=sigmas,
         )
         latents = self.prepare_latents(batch_size, dtype, device, generator)
+        print("Latent shape:", latents.shape)
 
         guidance = None
         if hasattr(self.model, 'guidance_embed') and \
@@ -750,30 +805,96 @@ class Hunyuan3DDiTFlowMatchingPipeline(Hunyuan3DDiTPipeline):
             guidance = torch.tensor([guidance_scale] * batch_size, device=device, dtype=dtype)
             # logger.info(f'Using guidance embed with scale {guidance_scale}')
 
+        mb = MomentumBuffer(momentum=-0.5) if do_classifier_free_guidance else None
+        batch_size     = latents.shape[0]
+        log_posterior  = torch.zeros(batch_size, device=latents.device)
+
+
+        # Track guidance strength history for adaptive scaling
+        guidance_history = []
+        
+        inverse_target_strength = 0.1  # Target guidance strength ratio
+        # Tweeeaaaak
+        min_scale = 0.1       # Minimum scale factor
+        max_scale = 3      # Maximum scale factor
+        
+        #timesteps = torch.linspace(0, 1, 50, device=device, dtype=dtype)
+        #timesteps = 1000 * (timesteps ** 0.75)        
+        #
+        #classifier = torch.load('latent_classifier_experiment/latent_classifier.pth', map_location=device)
+        #classifier = classifier.to(device).eval()  # <--- ensure on device + eval mode
+        # Convert classifier to float16 if needed
+        #if dtype == torch.float16:
+            #classifier = classifier.half()
+
         with synchronize_timer('Diffusion Sampling'):
-            for i, t in enumerate(tqdm(timesteps, disable=not enable_pbar, desc="Diffusion Sampling:")):
-                # expand the latents if we are doing classifier free guidance
-                if do_classifier_free_guidance:
-                    latent_model_input = torch.cat([latents] * 2)
-                else:
-                    latent_model_input = latents
+            # run all diffusion steps without autograd, except classifier block
+            with torch.no_grad():
+                for i, t in enumerate(tqdm(timesteps, disable=not enable_pbar, desc="Diffusion Sampling:")):
+                    # expand the latents if we are doing classifier free guidance
+                    if do_classifier_free_guidance:
+                        latent_model_input = torch.cat([latents] * 2)
+                    else:
+                        latent_model_input = latents
 
-                # NOTE: we assume model get timesteps ranged from 0 to 1
-                timestep = t.expand(latent_model_input.shape[0]).to(latents.dtype)
-                timestep = timestep / self.scheduler.config.num_train_timesteps
-                noise_pred = self.model(latent_model_input, timestep, cond, guidance=guidance)
+                    num_timesteps = len(timesteps)
+                    progress = (i + 1) / num_timesteps
+                    progress_scale = 1.0 - progress
 
-                if do_classifier_free_guidance:
-                    noise_pred_cond, noise_pred_uncond = noise_pred.chunk(2)
-                    noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
 
-                # compute the previous noisy sample x_t -> x_t-1
-                outputs = self.scheduler.step(noise_pred, t, latents)
-                latents = outputs.prev_sample
+                    # NOTE: we assume model get timesteps ranged from 0 to 1
+                    timestep = t.expand(latent_model_input.shape[0]).to(latents.dtype)
+                    timestep = timestep / self.scheduler.config.num_train_timesteps
 
-                if callback is not None and i % callback_steps == 0:
-                    step_idx = i // getattr(self.scheduler, "order", 1)
-                    callback(step_idx, t, outputs)
+                #}
+                    noise_pred = self.model(latent_model_input, timestep, cond, guidance=guidance)
+
+                    print(timesteps)
+
+                    if do_classifier_free_guidance:       
+                        noise_pred_cond, noise_pred_uncond = noise_pred.chunk(2)
+                        
+                        # Measure natural guidance strength
+                        diff_norm = (noise_pred_cond - noise_pred_uncond).norm()
+                        cond_norm = noise_pred_cond.norm()
+                        natural_strength = diff_norm / (cond_norm + 1e-8)
+                        guidance_history.append(natural_strength.item())
+                        
+                        print(f"Step {i+1}: Natural strength: {natural_strength:.6f}")
+                        
+                        adaptive_scale = torch.clamp(natural_strength / (inverse_target_strength + 1e-6), min_scale, max_scale)
+
+
+                        effective_guidance = adaptive_scale * guidance_scale
+                        print(f"Adaptive scale: {adaptive_scale:.3f}, Effective guidance: {effective_guidance:.3f}")
+                        diff = noise_pred_cond - noise_pred_uncond
+                        noise_pred = noise_pred_uncond + effective_guidance * (diff)
+                        #v = noise_pred.detach()
+                        #s = v.abs().flatten().float().quantile(0.995)
+                        #noise_pred = torch.clamp(v, -s, s)
+    
+
+                    # compute the previous noisy sample x_t -> x_t-1
+                    outputs = self.scheduler.step(noise_pred, t, latents)
+                    latents = outputs.prev_sample
+
+                    # -- classifier‐based guidance: nudge latents toward class 1 --
+                    #with torch.enable_grad():
+                    #    if classifier_scale > 0.0 and progress > .7 and progress < 0.95: #and progress < 0.85:
+                    #        lat = latents.detach().requires_grad_(True)
+                    #        logits = classifier(lat.view(lat.shape[0], -1))
+                            # use softmax‐based scoring instead of log‐softmax
+                    #        probs = torch.softmax(logits, dim=1)
+                            # debug: print one example of logits and probs
+                    #        print(f"Classifier logits: {logits[0].detach().cpu().numpy()}, probs: {probs[0].detach().cpu().numpy()}")
+                    #        score = probs[:, 1].sum()    # maximize P(class=1)
+                            
+                    #        grad = torch.autograd.grad(score, lat)[0]
+                    #        latents = (lat + 10 * grad).detach()
+
+                    if callback is not None and i % callback_steps == 0:
+                        step_idx = i // getattr(self.scheduler, "order", 1)
+                        callback(step_idx, t, outputs)
 
         return self._export(
             latents,
@@ -781,3 +902,10 @@ class Hunyuan3DDiTFlowMatchingPipeline(Hunyuan3DDiTPipeline):
             box_v, mc_level, num_chunks, octree_resolution, mc_algo,
             enable_pbar=enable_pbar,
         )
+                 #noise_pred = adaptive_projected_guidance(
+                    #    noise_pred_cond, noise_pred_uncond,
+                    #    guidance_scale=guidance_scale,
+                    #    momentum_buffer=mb,
+                    #    eta=0.0,
+                    #    norm_threshold=5.0,
+                    #)
