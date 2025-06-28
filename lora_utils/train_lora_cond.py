@@ -56,7 +56,7 @@ def parse_args():
     parser.add_argument("--target_modules",nargs="+", default=["to_q","to_v"])
     parser.add_argument("--cond_dim",      type=int, default=1024, help="dimension of the learnable token")
     parser.add_argument("--batch_size",    type=int, default=4)
-    parser.add_argument("--lr",            type=float, default=1e-4)
+    parser.add_argument("--lr",            type=float, default=4e-5)
     parser.add_argument("--epochs",        type=int, default=10)
     parser.add_argument("--timesteps",     type=int, default=1000)
     parser.add_argument("--max_grad_norm", type=float, default=1.0, help="max norm for gradient clipping")

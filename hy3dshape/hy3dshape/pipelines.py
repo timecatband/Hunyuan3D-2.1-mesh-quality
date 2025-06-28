@@ -423,6 +423,7 @@ class Hunyuan3DDiTPipeline:
     def encode_cond(self, image, additional_cond_inputs, do_classifier_free_guidance, dual_guidance):
         bsz = image.shape[0]
         cond = self.conditioner(image=image, **additional_cond_inputs)
+        print("Cond shape:", {k: v.shape for k, v in cond.items()})
 
         if do_classifier_free_guidance:
             un_cond = self.conditioner.unconditional_embedding(bsz, **additional_cond_inputs)
@@ -629,6 +630,7 @@ class Hunyuan3DDiTPipeline:
                 else:
                     latent_model_input = latents
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
+                print("Latnet shape:", latents.shape)
 
                 # predict the noise residual
                 timestep_tensor = torch.tensor([t], dtype=t_dtype, device=device)
@@ -743,6 +745,16 @@ def get_guidance_scale(t_frac, w_min=1.0, w_max=5.0):
     return w_min + (w_max - w_min) * math.sin(math.pi * t_frac)
 
 
+def project(
+v0: torch.Tensor, # [B, C, H, W]
+v1: torch.Tensor, # [B, C, H, W]
+):
+    dtype = v0.dtype
+    v0, v1 = v0.double(), v1.double()
+    v1 = torch.nn.functional.normalize(v1, dim=[-1, -2, -3])
+    v0_parallel = (v0 * v1).sum(dim=[-1, -2, -3], keepdim=True) * v1
+    v0_orthogonal = v0 - v0_parallel
+    return v0_parallel.to(dtype), v0_orthogonal.to(dtype)
 
 class Hunyuan3DDiTFlowMatchingPipeline(Hunyuan3DDiTPipeline):
     # allow gradients for classifier‐based guidance
@@ -764,6 +776,8 @@ class Hunyuan3DDiTFlowMatchingPipeline(Hunyuan3DDiTPipeline):
          enable_pbar=True,
          mask=None,
          classifier_scale: float = 1.0,          # <--- new
+         extra_cond_tok: Optional[torch.Tensor] = None,
+         append_extra_cond_tok: bool = True,
         **kwargs,
     ) -> List[List[trimesh.Trimesh]]:
         #guidance_scale = 10.0
@@ -774,7 +788,12 @@ class Hunyuan3DDiTFlowMatchingPipeline(Hunyuan3DDiTPipeline):
 
         device = self.device
         dtype = self.dtype
-        do_classifier_free_guidance = True 
+        do_classifier_free_guidance = True #guidance_scale >= 0 and not (
+            #hasattr(self.model, 'guidance_embed') and
+            #self.model.guidance_embed is True
+        #)
+
+        # print('image', type(image), 'mask', type(mask))
         cond_inputs = self.prepare_image(image, mask)
         image = cond_inputs.pop('image')
         cond = self.encode_cond(
@@ -783,6 +802,15 @@ class Hunyuan3DDiTFlowMatchingPipeline(Hunyuan3DDiTPipeline):
             do_classifier_free_guidance=do_classifier_free_guidance,
             dual_guidance=False,
         )
+        if extra_cond_tok is not None:
+            extra_cond_tok = extra_cond_tok.half().to(device)
+        
+        if extra_cond_tok is not None and append_extra_cond_tok:
+            print("Adding extra cond tokens:", extra_cond_tok.shape)
+            zero_cond = torch.zeros(1, 1, cond["main"].shape[-1], dtype=cond["main"].dtype, device=cond["main"].device).half()
+            extra_cond_tok = extra_cond_tok.half()
+            extra_cond_tok = torch.cat([zero_cond, extra_cond_tok], dim=0).to(device)
+            cond["main"] = torch.cat([cond["main"], extra_cond_tok], dim=1)
         print("Cond shape:", {k: v.shape for k, v in cond.items()})
 
         batch_size = image.shape[0]
@@ -812,20 +840,19 @@ class Hunyuan3DDiTFlowMatchingPipeline(Hunyuan3DDiTPipeline):
 
         # Track guidance strength history for adaptive scaling
         guidance_history = []
-        
-        inverse_target_strength = 0.1  # Target guidance strength ratio
-        # Tweeeaaaak
+
+        target_strength = 0.1  # Target guidance strength ratio
+        # Tweak
         min_scale = 0.1       # Minimum scale factor
-        max_scale = 3      # Maximum scale factor
+        max_scale = 3.0      # Maximum scale factor
         
         #timesteps = torch.linspace(0, 1, 50, device=device, dtype=dtype)
         #timesteps = 1000 * (timesteps ** 0.75)        
-        #
-        #classifier = torch.load('latent_classifier_experiment/latent_classifier.pth', map_location=device)
-        #classifier = classifier.to(device).eval()  # <--- ensure on device + eval mode
+        classifier = torch.load('latent_classifier_experiment/latent_classifier.pth', map_location=device)
+        classifier = classifier.to(device).eval()  # <--- ensure on device + eval mode
         # Convert classifier to float16 if needed
-        #if dtype == torch.float16:
-            #classifier = classifier.half()
+        if dtype == torch.float16:
+            classifier = classifier.half()
 
         with synchronize_timer('Diffusion Sampling'):
             # run all diffusion steps without autograd, except classifier block
@@ -839,18 +866,35 @@ class Hunyuan3DDiTFlowMatchingPipeline(Hunyuan3DDiTPipeline):
 
                     num_timesteps = len(timesteps)
                     progress = (i + 1) / num_timesteps
-                    progress_scale = 1.0 - progress
+                    #progress = progress**(0.9)
+                    #if progress < 0.05:
+                    #    guidance_scale = 1.0
 
+                    # THIS IS ACTUALLY BEST SO FAR!!!
+                    #if progress > 0.95:
+                    #    guidance_scale = 1.0
+
+
+                    #progress = (1-progress)
+                    #progress_scale = 1.0
+                    progress_scale = 1.0 - progress
+                    #progress_scale = progress_scale**2
+                   # if progress_scale < 1/guidance_scale:
+                #    progress_scale = 1/guidance_scale
+                
+
+                    print(f"Progress: {progress}, Step: {i + 1}/{num_timesteps}")
 
                     # NOTE: we assume model get timesteps ranged from 0 to 1
                     timestep = t.expand(latent_model_input.shape[0]).to(latents.dtype)
                     timestep = timestep / self.scheduler.config.num_train_timesteps
-
-                #}
+                                
                     noise_pred = self.model(latent_model_input, timestep, cond, guidance=guidance)
-
-                    print(timesteps)
-
+                    if extra_cond_tok is not None and append_extra_cond_tok == False:
+                        extra_cond = {"main": extra_cond_tok}
+                        latents_no_batch = latent_model_input[:1]
+                        noise_pred_extra_tok = self.model(latents_no_batch, timestep[:1], extra_cond, guidance=guidance)
+                    
                     if do_classifier_free_guidance:       
                         noise_pred_cond, noise_pred_uncond = noise_pred.chunk(2)
                         
@@ -862,13 +906,20 @@ class Hunyuan3DDiTFlowMatchingPipeline(Hunyuan3DDiTPipeline):
                         
                         print(f"Step {i+1}: Natural strength: {natural_strength:.6f}")
                         
-                        adaptive_scale = torch.clamp(natural_strength / (inverse_target_strength + 1e-6), min_scale, max_scale)
+                        # Option 1: Inverse compensation
+                        adaptive_scale = torch.clamp(natural_strength / (target_strength + 1e-6), min_scale, max_scale)
 
-
+                        
                         effective_guidance = adaptive_scale * guidance_scale
                         print(f"Adaptive scale: {adaptive_scale:.3f}, Effective guidance: {effective_guidance:.3f}")
                         diff = noise_pred_cond - noise_pred_uncond
                         noise_pred = noise_pred_uncond + effective_guidance * (diff)
+                        if extra_cond_tok is not None and append_extra_cond_tok == False and progress > 0.75:
+                            noise_pred += progress*10*noise_pred_extra_tok
+                        
+                        #diff_parallel, diff_orthogonal = project(diff, noise_pred_cond)
+                        #normalized_update = diff_orthogonal + 0.0 * diff_parallel
+                        #noise_pred = noise_pred_cond + (effective_guidance - 1) * normalized_update
                         #v = noise_pred.detach()
                         #s = v.abs().flatten().float().quantile(0.995)
                         #noise_pred = torch.clamp(v, -s, s)
@@ -879,18 +930,18 @@ class Hunyuan3DDiTFlowMatchingPipeline(Hunyuan3DDiTPipeline):
                     latents = outputs.prev_sample
 
                     # -- classifier‐based guidance: nudge latents toward class 1 --
-                    #with torch.enable_grad():
-                    #    if classifier_scale > 0.0 and progress > .7 and progress < 0.95: #and progress < 0.85:
-                    #        lat = latents.detach().requires_grad_(True)
-                    #        logits = classifier(lat.view(lat.shape[0], -1))
+                    with torch.enable_grad():
+                        if classifier_scale > 0.0 and progress > .7 and progress < 0.95: #and progress < 0.85:
+                            lat = latents.detach().requires_grad_(True)
+                            logits = classifier(lat.view(lat.shape[0], -1))
                             # use softmax‐based scoring instead of log‐softmax
-                    #        probs = torch.softmax(logits, dim=1)
+                            probs = torch.softmax(logits, dim=1)
                             # debug: print one example of logits and probs
-                    #        print(f"Classifier logits: {logits[0].detach().cpu().numpy()}, probs: {probs[0].detach().cpu().numpy()}")
-                    #        score = probs[:, 1].sum()    # maximize P(class=1)
+                            print(f"Classifier logits: {logits[0].detach().cpu().numpy()}, probs: {probs[0].detach().cpu().numpy()}")
+                            score = probs[:, 1].sum()    # maximize P(class=1)
                             
-                    #        grad = torch.autograd.grad(score, lat)[0]
-                    #        latents = (lat + 10 * grad).detach()
+                            grad = torch.autograd.grad(score, lat)[0]
+                            latents = (lat + 10 * grad).detach()
 
                     if callback is not None and i % callback_steps == 0:
                         step_idx = i // getattr(self.scheduler, "order", 1)
