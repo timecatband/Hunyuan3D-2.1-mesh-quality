@@ -1,3 +1,4 @@
+
 from PIL import Image
 
 from hy3dshape.rembg import BackgroundRemover
@@ -18,8 +19,9 @@ image = rembg(image)
 
 
 print("cats")
-peft_model = PeftModel.from_pretrained(pipeline_shapegen.model, 'lora_adapters')
+peft_model = PeftModel.from_pretrained(pipeline_shapegen.model, 'lora_adapters', "adapter1")
 pipeline_shapegen.model = peft_model
+pipeline_shapegen.model.set_adapter("adapter1")
 
 # Load the extra conditional token
 cond_tok = torch.load('lora_adapters/cond_token.pt')
@@ -27,7 +29,8 @@ print("Conditional token shape:", cond_tok.shape)
 #cond_tok = None
 #print("Not inserting extra token")
 
-mesh = pipeline_shapegen(image=image, num_inference_steps=50, guidance_scale=15.0, extra_cond_token=cond_tok, classifier_scale=0.0, octree_resolution=378)[0]
+#mesh = pipeline_shapegen(image=image, num_inference_steps=50, guidance_scale=15.0, extra_cond_token=cond_tok, classifier_scale=0.0, octree_resolution=512, mc_algo="poisson")[0]
+mesh = pipeline_shapegen(image=image, num_inference_steps=50, guidance_scale=20.0, extra_cond_token=cond_tok, classifier_scale=0.0, octree_resolution=256)[0]
 mesh.export('demo_4.glb')
 
 
