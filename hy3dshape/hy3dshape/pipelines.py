@@ -916,7 +916,7 @@ class Hunyuan3DDiTFlowMatchingPipeline(Hunyuan3DDiTPipeline):
                         noise_pred = noise_pred_uncond + effective_guidance * (diff)
                         if extra_cond_tok is not None and append_extra_cond_tok == False and progress > 0.1:
                             #extra_parallel, extra_orthogonal = project(noise_pred_extra_tok, noise_pred_cond)
-                            #noise_pred_extra_tok = 20*extra_orthogonal + 0.0 * extra_parallel
+                            #noise_pred_extra_tok = 10*extra_orthogonal + 0.1 * extra_parallel
                             noise_pred += progress*5*noise_pred_extra_tok
                         
                         #diff_parallel, diff_orthogonal = project(diff, noise_pred_cond)
