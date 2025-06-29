@@ -158,7 +158,7 @@ class ModelWorker:
         self.rembg = BackgroundRemover()
         self.pipeline = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(
             "tencent/Hunyuan3D-2.1",
-            subfolder=subfolder,
+            #subfolder=subfolder,
             use_safetensors=True,
             device=device,
         )
