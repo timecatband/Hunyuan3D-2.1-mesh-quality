@@ -775,7 +775,7 @@ class Hunyuan3DDiTFlowMatchingPipeline(Hunyuan3DDiTPipeline):
          output_type: Optional[str] = "trimesh",
          enable_pbar=True,
          mask=None,
-         classifier_scale: float = 1.0,          # <--- new
+         classifier_scale: float = 0.0,          # <--- new
          extra_cond_tok: Optional[torch.Tensor] = None,
          append_extra_cond_tok: bool = True,
         **kwargs,
