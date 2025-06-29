@@ -848,11 +848,11 @@ class Hunyuan3DDiTFlowMatchingPipeline(Hunyuan3DDiTPipeline):
         
         #timesteps = torch.linspace(0, 1, 50, device=device, dtype=dtype)
         #timesteps = 1000 * (timesteps ** 0.75)        
-        classifier = torch.load('latent_classifier_experiment/latent_classifier.pth', map_location=device)
-        classifier = classifier.to(device).eval()  # <--- ensure on device + eval mode
+        #classifier = torch.load('latent_classifier_experiment/latent_classifier.pth', map_location=device)
+        #classifier = classifier.to(device).eval()  # <--- ensure on device + eval mode
         # Convert classifier to float16 if needed
-        if dtype == torch.float16:
-            classifier = classifier.half()
+        #if dtype == torch.float16:
+            #classifier = classifier.half()
 
         with synchronize_timer('Diffusion Sampling'):
             # run all diffusion steps without autograd, except classifier block
@@ -932,18 +932,18 @@ class Hunyuan3DDiTFlowMatchingPipeline(Hunyuan3DDiTPipeline):
                     latents = outputs.prev_sample
 
                     # -- classifier‐based guidance: nudge latents toward class 1 --
-                    with torch.enable_grad():
-                        if classifier_scale > 0.0 and progress > .7 and progress < 0.95: #and progress < 0.85:
-                            lat = latents.detach().requires_grad_(True)
-                            logits = classifier(lat.view(lat.shape[0], -1))
+                    #with torch.enable_grad():
+                        #if classifier_scale > 0.0 and progress > .7 and progress < 0.95: #and progress < 0.85:
+                            #lat = latents.detach().requires_grad_(True)
+                            #logits = classifier(lat.view(lat.shape[0], -1))
                             # use softmax‐based scoring instead of log‐softmax
-                            probs = torch.softmax(logits, dim=1)
+                            #probs = torch.softmax(logits, dim=1)
                             # debug: print one example of logits and probs
-                            print(f"Classifier logits: {logits[0].detach().cpu().numpy()}, probs: {probs[0].detach().cpu().numpy()}")
-                            score = probs[:, 1].sum()    # maximize P(class=1)
+                            #print(f"Classifier logits: {logits[0].detach().cpu().numpy()}, probs: {probs[0].detach().cpu().numpy()}")
+                            #score = probs[:, 1].sum()    # maximize P(class=1)
                             
-                            grad = torch.autograd.grad(score, lat)[0]
-                            latents = (lat + 10 * grad).detach()
+                            #grad = torch.autograd.grad(score, lat)[0]
+                            #latents = (lat + 10 * grad).detach()
 
                     if callback is not None and i % callback_steps == 0:
                         step_idx = i // getattr(self.scheduler, "order", 1)
