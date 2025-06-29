@@ -159,7 +159,7 @@ class ModelWorker:
         self.pipeline = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(
             "tencent/Hunyuan3D-2.1",
             #subfolder=subfolder,
-            use_safetensors=True,
+            #use_safetensors=True,
             device=device,
         )
         peft_model = PeftModel.from_pretrained(
