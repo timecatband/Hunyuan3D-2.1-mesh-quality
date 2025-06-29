@@ -27,7 +27,7 @@ import threading
 import traceback
 import uuid
 from io import BytesIO
-
+import sys
 import torch
 import trimesh
 import uvicorn
@@ -174,6 +174,11 @@ class ModelWorker:
         #     'Tencent-Hunyuan/HunyuanDiT-v1.1-Diffusers-Distilled',
         #     device=device
         # )
+        cond_tok_path = os.path.join(args.lora_path, "cond_token.pt")
+        self.cond_tok = torch.load(cond_tok_path, map_location=device) if os.path.exists(cond_tok_path) else None
+        if self.cond_tok is None:
+            logger.warning(f"Conditional token not found at {cond_tok_path}. Using None.")
+            sys.exit(1)
         if enable_tex:
             self.pipeline_tex = Hunyuan3DPaintPipeline.from_pretrained(tex_model_path)
 
@@ -214,6 +219,8 @@ class ModelWorker:
             params['num_inference_steps'] = 50#params.get("num_inference_steps", 50)
             params['guidance_scale'] = 15#params.get('guidance_scale', 15.0)
             params['mc_algo'] = 'mc'
+            params['extra_cond_tok'] = self.cond_tok
+            params['append_extra_cond_tok'] = False
             import time
             start_time = time.time()
             mesh = self.pipeline(**params)[0]
