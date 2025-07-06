@@ -55,7 +55,7 @@ def main():
     lora_cfg = LoraConfig(
         r=args.r,
         lora_alpha=args.alpha,
-        target_modules=args.target_modules
+        target_modules="all-linear" #args.target_modules
     )
     dit_model = get_peft_model(base_dit, lora_cfg).to(device)
     dit_model.train()
