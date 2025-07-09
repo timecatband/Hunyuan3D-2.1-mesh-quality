@@ -808,9 +808,9 @@ def main():
                        help="Batch size for training (use 1 for memory constrained setups)")
     parser.add_argument("--learning_rate", type=float, default=1e-4,
                        help="Learning rate")
-    parser.add_argument("--num_epochs", type=int, default=100,
+    parser.add_argument("--num_epochs", type=int, default=5,
                        help="Number of training epochs")
-    parser.add_argument("--save_every", type=int, default=10,
+    parser.add_argument("--save_every", type=int, default=1,
                        help="Save checkpoint every N epochs")
     parser.add_argument("--gradient_accumulation_steps", type=int, default=4,
                        help="Gradient accumulation steps (increase if using smaller batch size)")
