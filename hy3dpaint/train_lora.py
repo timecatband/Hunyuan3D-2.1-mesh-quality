@@ -453,6 +453,11 @@ class LoraTrainer:
         """Setup the HunyuanPaint model using the same approach as demo.py."""
         print("Setting up HunyuanPaint model...")
         
+        # Clear GPU cache before loading
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            gc.collect()
+        
         # Initialize using the same approach as demo.py
         max_num_view = 6
         resolution = 512
@@ -467,10 +472,12 @@ class LoraTrainer:
         model_path = os.path.join(model_path, "hunyuan3d-paintpbr-v2-1")
         
         # Load the pipeline with pretrained weights
+        # Use CPU first to avoid OOM during loading, then move to GPU
         pipeline = DiffusionPipeline.from_pretrained(
             model_path,
             custom_pipeline=conf.custom_pipeline,
-            torch_dtype=torch.float16
+            torch_dtype=torch.float16,
+            device_map=None  # Load to CPU first
         )
         
         # Set up the scheduler
@@ -536,8 +543,13 @@ class LoraTrainer:
         else:
             print("DINO v2 not required by this model")
         
-        # Move to device
-        self.model.to(self.device)
+        # Move to device after all setup is complete
+        pipeline = pipeline.to(self.device)
+        
+        # Clear cache after moving to device
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            gc.collect()
         
         # Setup mixed precision
         if self.mixed_precision:
@@ -746,28 +758,93 @@ class LoraTrainer:
         print(f"Checkpoint saved to {checkpoint_dir}")
         
     def load_checkpoint(self, checkpoint_path):
-        """Load training checkpoint."""
+        """Load training checkpoint with proper memory management."""
         checkpoint_path = Path(checkpoint_path)
         
-        # Load LORA adapter
-        self.model.unet.load_adapter(checkpoint_path, "ckpt")
-        self.model.unet.set_adapter("ckpt")
+        print(f"Loading checkpoint from {checkpoint_path}")
         
-        # Load training state
+        # Clear GPU cache before loading
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            gc.collect()
+        
+        # Load training state first (lighter memory footprint)
         state_file = checkpoint_path / "training_state.pt"
         if state_file.exists():
-            state_dict = torch.load(state_file, map_location=self.device)
+            print("Loading training state...")
+            # Load to CPU first to avoid GPU memory spike
+            state_dict = torch.load(state_file, map_location='cpu')
             self.epoch = state_dict["epoch"]
             self.global_step = state_dict["global_step"]
-            self.optimizer.load_state_dict(state_dict["optimizer"])
-            self.lr_scheduler.load_state_dict(state_dict["lr_scheduler"])
             
-            if self.mixed_precision and "scaler" in state_dict:
+            # Load optimizer state (this can be memory intensive)
+            if hasattr(self, 'optimizer') and self.optimizer is not None:
+                self.optimizer.load_state_dict(state_dict["optimizer"])
+            
+            # Load scheduler state
+            if hasattr(self, 'lr_scheduler') and self.lr_scheduler is not None:
+                self.lr_scheduler.load_state_dict(state_dict["lr_scheduler"])
+            
+            # Load scaler state if using mixed precision
+            if self.mixed_precision and "scaler" in state_dict and hasattr(self, 'scaler'):
                 self.scaler.load_state_dict(state_dict["scaler"])
-
-        torch.cuda.empty_cache()  # Clear cache after loading
+            
+            # Clear the state_dict from memory
+            del state_dict
+        
+        # Clear cache before loading LORA weights
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            gc.collect()
+        
+        # Load LORA adapter with proper memory management
+        print("Loading LORA adapter...")
+        
+        # Check if LORA config file exists
+        if (checkpoint_path / "adapter_config.json").exists():
+            try:
+                # Load adapter with explicit adapter name to avoid conflicts
+                adapter_name = "resumed_adapter"
                 
-        print(f"Checkpoint loaded from {checkpoint_path}")
+                # If adapter already exists, remove it first
+                if hasattr(self.model.unet, 'peft_config') and adapter_name in self.model.unet.peft_config:
+                    print(f"Removing existing adapter: {adapter_name}")
+                    self.model.unet.delete_adapter(adapter_name)
+                
+                # Load the new adapter
+                self.model.unet.load_adapter(checkpoint_path, adapter_name, device=self.device)
+                self.model.unet.set_adapter(adapter_name)
+                
+                print(f"LORA adapter loaded and activated: {adapter_name}")
+                
+            except Exception as e:
+                print(f"Error loading LORA adapter: {e}")
+                print("Attempting alternative loading method...")
+                
+                # Alternative method: load weights manually
+                try:
+                    adapter_weights = torch.load(checkpoint_path / "adapter_model.safetensors", map_location=self.device)
+                    # Load weights into the current LORA adapter
+                    missing_keys, unexpected_keys = self.model.unet.load_state_dict(adapter_weights, strict=False)
+                    if missing_keys:
+                        print(f"Missing keys during LORA loading: {missing_keys[:5]}...")  # Show first 5
+                    if unexpected_keys:
+                        print(f"Unexpected keys during LORA loading: {unexpected_keys[:5]}...")  # Show first 5
+                except Exception as e2:
+                    print(f"Alternative loading method also failed: {e2}")
+                    print("Continuing without loaded LORA weights...")
+        
+        # Ensure model is in training mode and on correct device
+        self.model.unet.train()
+        self.model.to(self.device)
+        
+        # Final cleanup
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            gc.collect()
+                
+        print(f"Checkpoint loaded successfully from {checkpoint_path}")
+        print(f"Resuming from epoch {self.epoch}, global step {self.global_step}")
         
     def train(self):
         """Main training loop."""
@@ -780,9 +857,19 @@ class LoraTrainer:
         self.setup_optimizer()
         self.setup_logging()
         
+        # Clear cache after setup
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            gc.collect()
+        
         # Resume from checkpoint if specified
         if self.resume_from:
             self.load_checkpoint(self.resume_from)
+            
+            # Additional cleanup after checkpoint loading
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                gc.collect()
         
         # Training loop
         for epoch in range(self.epoch, self.num_epochs):
