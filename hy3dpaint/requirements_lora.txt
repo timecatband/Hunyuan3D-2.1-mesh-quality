@@ -1,0 +1,5 @@
+# Additional requirements for LORA training
+peft>=0.7.0
+wandb
+accelerate>=0.25.0
+transformers>=4.35.0

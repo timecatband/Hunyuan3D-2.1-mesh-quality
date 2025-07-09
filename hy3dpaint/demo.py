@@ -13,6 +13,7 @@
 # by Tencent in accordance with TENCENT HUNYUAN COMMUNITY LICENSE AGREEMENT.
 
 from textureGenPipeline import Hunyuan3DPaintPipeline, Hunyuan3DPaintConfig
+import sys
 
 try:
     from utils.torchvision_fix import apply_fix
@@ -31,5 +32,5 @@ if __name__ == "__main__":
 
     conf = Hunyuan3DPaintConfig(max_num_view, resolution)
     paint_pipeline = Hunyuan3DPaintPipeline(conf)
-    output_mesh_path = paint_pipeline(mesh_path="./assets/case_1/mesh.glb", image_path="./assets/case_1/image.png")
+    output_mesh_path = paint_pipeline(mesh_path=sys.argv[1], image_path=sys.argv[2])
     print(f"Output mesh path: {output_mesh_path}")
