@@ -28,6 +28,22 @@ from datetime import datetime
 import shutil
 import gc
 
+SD_TARGET_MODULES = [
+    "to_q",
+    "to_k",
+    "to_v",
+    "proj",
+    "proj_in",
+    "proj_out",
+    "conv",
+    "conv1",
+    "conv2",
+    "conv_shortcut",
+    "to_out.0",
+    "time_emb_proj",
+    "ff.net.2",
+]
+
 # Optional imports with graceful fallback
 try:
     from peft import LoraConfig, get_peft_model, TaskType
@@ -543,7 +559,7 @@ class LoraTrainer:
         lora_config = LoraConfig(
             r=self.lora_rank,
             lora_alpha=self.lora_alpha,
-            target_modules="all-linear",
+            target_modules=SD_TARGET_MODULES,
             lora_dropout=self.lora_dropout,
             bias="none",
         )
@@ -748,6 +764,8 @@ class LoraTrainer:
             
             if self.mixed_precision and "scaler" in state_dict:
                 self.scaler.load_state_dict(state_dict["scaler"])
+
+        torch.cuda.empty_cache()  # Clear cache after loading
                 
         print(f"Checkpoint loaded from {checkpoint_path}")
         
@@ -858,7 +876,7 @@ def main():
                        help="Gradient accumulation steps (increase if using smaller batch size)")
     parser.add_argument("--max_grad_norm", type=float, default=1.0,
                        help="Maximum gradient norm for clipping")
-    parser.add_argument("--lora_rank", type=int, default=8,
+    parser.add_argument("--lora_rank", type=int, default=16,
                        help="LORA rank")
     parser.add_argument("--lora_alpha", type=int, default=16,
                        help="LORA alpha parameter")
@@ -878,7 +896,7 @@ def main():
                        help="Weight for consistency loss")
     parser.add_argument("--albedo_loss_lambda", type=float, default=0.85,
                        help="Weight for albedo loss")
-    parser.add_argument("--enable_xformers", action="store_true", default=True,
+    parser.add_argument("--enable_xformers", action="store_true", default=False,
                        help="Enable xFormers memory efficient attention")
     parser.add_argument("--disable_xformers", action="store_true",
                        help="Disable xFormers memory efficient attention")

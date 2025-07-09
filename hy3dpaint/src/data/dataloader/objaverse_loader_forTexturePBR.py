@@ -86,14 +86,31 @@ class TextureDataset(BaseDataset):
                 break
         if light_suffix is None:
             raise ValueError(f"light suffix not found in {ref_image_path}")
-        ref_image_diff_light_path = random.choice(
-            [
-                ref_image_path.replace(light_suffix, tar_suffix)
-                for tar_suffix in self.lighting_suffix_pool
-                if tar_suffix != light_suffix
-            ]
-        )
-        images_ref_paths = [ref_image_path, ref_image_diff_light_path]
+        
+        # Find alternative lighting conditions that actually exist
+        alternative_light_paths = []
+        for tar_suffix in self.lighting_suffix_pool:
+            if tar_suffix != light_suffix:
+                alt_path = ref_image_path.replace(light_suffix, tar_suffix)
+                if os.path.exists(alt_path):
+                    alternative_light_paths.append(alt_path)
+        
+        # Build reference image paths list
+        images_ref_paths = [ref_image_path]
+        if alternative_light_paths:
+            # Use a different lighting condition if available
+            ref_image_diff_light_path = random.choice(alternative_light_paths)
+            images_ref_paths.append(ref_image_diff_light_path)
+        else:
+            # Fall back to using another random condition image if no lighting variants exist
+            print(f"Warning: No alternative lighting conditions found for {ref_image_path}, using random fallback")
+            fallback_candidates = [img for img in cond_images if img != ref_image_path]
+            if fallback_candidates:
+                images_ref_paths.append(random.choice(fallback_candidates))
+            else:
+                # Last resort: duplicate the reference image
+                print(f"Warning: Only one condition image available, duplicating {ref_image_path}")
+                images_ref_paths.append(ref_image_path)
 
         # Data aug
         bg_c_record = None
@@ -107,9 +124,22 @@ class TextureDataset(BaseDataset):
                     bg_c = bg_white
             if i == 0:
                 bg_c_record = bg_c
-            image, alpha = self.load_image(image_ref, bg_c_record)
+            try:
+                image, alpha = self.load_image(image_ref, bg_c_record)
+            except Exception as e:
+                print(f"Error loading image {image_ref}: {e}")
+                # Skip this image if it fails to load
+                continue
             image = self.augment_image(image, bg_c_record).float()
             images_ref.append(image)
+        
+        # Ensure we have at least 2 reference images (pad with duplicates if necessary)
+        while len(images_ref) < 2:
+            if images_ref:
+                images_ref.append(images_ref[-1].clone())
+            else:
+                raise ValueError(f"Failed to load any reference images from {dirx}")
+                
         condition_dict["images_cond"] = torch.stack(images_ref, dim=0).float()
 
         for i, image_gen in enumerate(images_gen):
