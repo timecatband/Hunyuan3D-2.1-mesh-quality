@@ -55,6 +55,11 @@ except ImportError:
 except Exception as e:
     print(f"Warning: Failed to apply torchvision fix: {e}")
 
+def extract_into_tensor(a, t, x_shape):
+    """Extract values from tensor a at indices t, reshape to match x_shape"""
+    b, *_ = t.shape
+    out = a.gather(-1, t)
+    return out.reshape(b, *((1,) * (len(x_shape) - 1)))
 
 class TrainingWrapper:
     """Simple wrapper around the pipeline to provide training methods compatible with model.py"""
@@ -259,7 +264,7 @@ class TrainingWrapper:
         
         noise_pred = self.pipeline.unet(
             noisy_latents,  # Pass the 6D tensor: (B, N_pbr, N_gen, C, H, W)
-            t,              # Pass the original timesteps: (B,) - UNet handles internal expansion
+            t_flat,              # Pass the original timesteps: (B,) - UNet handles internal expansion
             encoder_hidden_states=shading_embeds,
             **cached_condition  # Pass all cached condition as kwargs like in forward_unet
         )
@@ -274,17 +279,53 @@ class TrainingWrapper:
         noise_pred_flat = noise_pred  # (B*N_pbr*N_gen, C, H, W)
         noise_pred_reshaped = noise_pred_flat.view(B, N_pbr, N_gen, C, H, W)
         noise_pred_albedo = noise_pred_reshaped[:, 0, :, :, :, :]  # (B, N_gen, C, H, W)
-        # noise_pred_mr = noise_pred_reshaped[:, 1, :, :, :, :]  # (B, N_gen, C, H, W) - ignore for loss
+        noise_pred_mr = noise_pred_reshaped[:, 1, :, :, :, :]  # (B, N_gen, C, H, W)
         
         # Split targets into albedo and MR components  
         noise_target_reshaped = noise.view(B, N_pbr, N_gen, C, H, W)
         noise_target_albedo = noise_target_reshaped[:, 0, :, :, :, :]  # (B, N_gen, C, H, W)
-        # noise_target_mr = noise_target_reshaped[:, 1, :, :, :, :]  # (B, N_gen, C, H, W) - ignore for loss
+        noise_target_mr = noise_target_reshaped[:, 1, :, :, :, :]  # (B, N_gen, C, H, W)
         
-        # Compute loss only on albedo predictions
-        loss = F.mse_loss(noise_pred_albedo.view(-1, C, H, W), noise_target_albedo.view(-1, C, H, W))
+        # Proper v-prediction loss computation
+        if self.train_scheduler.config.prediction_type == "v_prediction":
+            # Compute v-targets properly like in model.py
+            gen_flat = gen_latents.view(-1, C, H, W)
+            v_target = self.get_v(gen_flat, noise_flat, t_flat)
+            v_target_reshaped = v_target.view(B, N_pbr, N_gen, C, H, W)
+            v_target_albedo = v_target_reshaped[:, 0, :, :, :, :]
+            v_target_mr = v_target_reshaped[:, 1, :, :, :, :]
+            
+            # Compute losses for both albedo and MR (even if only training albedo)
+            albedo_loss = F.mse_loss(noise_pred_albedo.view(-1, C, H, W), v_target_albedo.view(-1, C, H, W))
+            
+            if self.mr_loss_enabled:
+                mr_loss = F.mse_loss(noise_pred_mr.view(-1, C, H, W), v_target_mr.view(-1, C, H, W))
+            else:
+                # Use dummy MR loss if not training MR
+                mr_loss = torch.tensor(0.0, device=self.device)
+            
+            # Apply the same loss weighting as model.py
+            loss = self.albedo_loss_lambda * albedo_loss + (1.0 - self.albedo_loss_lambda) * mr_loss
+            
+        else:
+            # Epsilon prediction (standard noise prediction)
+            albedo_loss = F.mse_loss(noise_pred_albedo.view(-1, C, H, W), noise_target_albedo.view(-1, C, H, W))
+            
+            if self.mr_loss_enabled:
+                mr_loss = F.mse_loss(noise_pred_mr.view(-1, C, H, W), noise_target_mr.view(-1, C, H, W))
+            else:
+                mr_loss = torch.tensor(0.0, device=self.device)
+            
+            loss = self.albedo_loss_lambda * albedo_loss + (1.0 - self.albedo_loss_lambda) * mr_loss
         
         return loss
+        
+    def get_v(self, x, noise, t):
+        """Compute the target velocity (v) for v-prediction training - copied from model.py"""
+        return (
+            extract_into_tensor(self.sqrt_alphas_cumprod, t, x.shape) * noise
+            - extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x.shape) * x
+        )
         
     def encode_images(self, images):
         """Encode images to latent space"""
@@ -693,7 +734,8 @@ class LoraTrainer:
         checkpoint_path = Path(checkpoint_path)
         
         # Load LORA adapter
-        self.model.unet.load_adapter(checkpoint_path)
+        self.model.unet.load_adapter(checkpoint_path, "ckpt")
+        self.model.unet.set_adapter("ckpt")
         
         # Load training state
         state_file = checkpoint_path / "training_state.pt"
@@ -816,9 +858,9 @@ def main():
                        help="Gradient accumulation steps (increase if using smaller batch size)")
     parser.add_argument("--max_grad_norm", type=float, default=1.0,
                        help="Maximum gradient norm for clipping")
-    parser.add_argument("--lora_rank", type=int, default=16,
+    parser.add_argument("--lora_rank", type=int, default=8,
                        help="LORA rank")
-    parser.add_argument("--lora_alpha", type=int, default=32,
+    parser.add_argument("--lora_alpha", type=int, default=16,
                        help="LORA alpha parameter")
     parser.add_argument("--lora_dropout", type=float, default=0.1,
                        help="LORA dropout rate")

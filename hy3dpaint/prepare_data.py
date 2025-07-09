@@ -759,7 +759,7 @@ def main():
         print(f"{'='*60}")
 
         if i > 500:
-            print("Skipping further processing after 100 meshes")
+            print("Skipping further processing after 500 meshes")
             sys.exit(0)
         
         # Determine sample name
