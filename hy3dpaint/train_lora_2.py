@@ -30,6 +30,7 @@ import os
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import gc
 
 SD_TARGET_MODULES = [
     # Standard attention modules
@@ -69,7 +70,9 @@ SD_TARGET_MODULES = [
 
 def load_pretrained_pipeline(max_num_view: int, resolution: int):
     conf = Hunyuan3DPaintConfig(max_num_view, resolution)
-    return Hunyuan3DPaintPipeline(conf)
+    pipe = Hunyuan3DPaintPipeline(conf)
+    pipe.models["super_model"] = None
+    return pipe
 
 def convert_to_training_module(paint_pipeline):
     pipeline = paint_pipeline.models["multiview_model"].pipeline
@@ -77,6 +80,7 @@ def convert_to_training_module(paint_pipeline):
                             view_size=512,
                             with_normal_map=True,
                             with_position_map=True)
+    del paint_pipeline
     return pipeline
 
 def setup_lora(pipeline):
@@ -167,6 +171,9 @@ def main():
     scaler = torch.cuda.amp.GradScaler()
     optimizer.zero_grad()
 
+    gc.collect()
+    torch.cuda.empty_cache()
+
     for epoch in range(args.num_epochs):
         train_module.train()
         pbar = tqdm(enumerate(dataloader), total=len(dataloader), desc=f"Epoch {epoch}")
@@ -184,10 +191,10 @@ def main():
             # step optimizer every accum_steps
             if (step + 1) % args.accum_steps == 0 or (step + 1) == len(dataloader):
                 # compute grad norm with scaler
-                scaler.unscale_(optimizer)
-                grad_norm = torch.nn.utils.clip_grad_norm_(
-                    train_module.unet.parameters(), max_norm=1e9
-                )
+                #scaler.unscale_(optimizer)
+                #grad_norm = torch.nn.utils.clip_grad_norm_(
+                #    train_module.unet.parameters(), max_norm=1e9
+                #)
                 scaler.step(optimizer)
                 scaler.update()
                 optimizer.zero_grad()

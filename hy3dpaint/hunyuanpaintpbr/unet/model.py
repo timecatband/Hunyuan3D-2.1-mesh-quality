@@ -481,8 +481,8 @@ class HunyuanPaint(pl.LightningModule):
         # logging
         self.log_dict(loss_dict, prog_bar=True, logger=True, on_step=True, on_epoch=True)
         self.log("global_step", self.global_step, prog_bar=True, logger=True, on_step=True, on_epoch=False)
-        lr = self.optimizers().param_groups[0]["lr"]
-        self.log("lr_abs", lr, prog_bar=True, logger=True, on_step=True, on_epoch=False)
+        #lr = self.optimizers().param_groups[0]["lr"]
+        #self.log("lr_abs", lr, prog_bar=True, logger=True, on_step=True, on_epoch=False)
 
         return 0.85 * (albedo_loss + mr_loss) + 0.15 * consistency_loss
 
