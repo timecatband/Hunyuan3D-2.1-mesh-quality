@@ -157,20 +157,40 @@ class AlbedoDataPreparer:
         if not PYRENDER_AVAILABLE:
             print("Warning: Pyrender not available. Textured rendering will use fallback method.")
             return
-            
+        mesh = self.mesh.dump(concatenate=True) if isinstance(self.mesh, trimesh.Scene) else self.mesh
+        
+        pyrender_vertices = mesh.vertices.copy()
+        max_bb = pyrender_vertices.max(axis=0)
+        min_bb = pyrender_vertices.min(axis=0)
+        center  = (max_bb + min_bb) / 2.0                             # ❶ bbox centre
+        radius  = np.linalg.norm(pyrender_vertices - center, axis=1).max()
+        scale   = (1.15 / (radius * 2.0)) if radius > 0 else 1.0      # ❷ identical formula
+
+        # build transform:  translate to origin using the *same* centre, then scale
+        transform = (
+            trimesh.transformations.scale_matrix(scale) @
+            trimesh.transformations.translation_matrix(-center)
+        )
+
+        mesh.apply_transform(transform)
+
+
+        # Apply centering and scaling to the original mesh object
+        # Note: The center for the transform should be from the original vertices
+        #original_center = mesh.vertices.mean(axis=0) if not isinstance(mesh, trimesh.Scene) else mesh.bounds.mean(axis=0)
+        #transform = trimesh.transformations.translation_matrix(-original_center)
+        #transform = np.dot(trimesh.transformations.scale_matrix(scale), transform)
+        #mesh.apply_transform(transform)
+
         try:
             # Center geometry using the entire scene's bounds
-            if isinstance(self.mesh, trimesh.Scene):
-                center = self.mesh.bounds.mean(axis=0)
-                transform = trimesh.transformations.translation_matrix(-center)
-                self.mesh.apply_transform(transform)
-                scene_for_pyrender = self.mesh
+            if isinstance(mesh, trimesh.Scene):
+                # The transformation is already applied to the scene's geometries
+                scene_for_pyrender = mesh
             else:
-                center = self.mesh.bounds.mean(axis=0)
-                transform = trimesh.transformations.translation_matrix(-center)
-                self.mesh.apply_transform(transform)
+                # The transformation is already applied to the mesh
                 # Create a scene from single mesh
-                scene_for_pyrender = trimesh.Scene([self.mesh])
+                scene_for_pyrender = trimesh.Scene([mesh])
             
             # Clean problematic textures (following render_glb.py pattern)
             geoms = scene_for_pyrender.geometry.values() if isinstance(scene_for_pyrender.geometry, dict) else [scene_for_pyrender.geometry]
@@ -184,10 +204,12 @@ class AlbedoDataPreparer:
                             setattr(mat, attr, None)
             
             # Create pyrender scene preserving valid textures
+
             self.pyrender_scene = pyrender.Scene.from_trimesh_scene(scene_for_pyrender, bg_color=[1.0, 1.0, 1.0, 0.0])
             
-            # Add camera
-            camera = pyrender.PerspectiveCamera(yfov=np.pi / 3.0, aspectRatio=1.0)
+            # Add camera - Use Orthographic to match MeshRender
+            ortho_scale = 1.2  # Match MeshRender's default ortho_scale
+            camera = pyrender.OrthographicCamera(xmag=ortho_scale / 2.0, ymag=ortho_scale / 2.0, znear=0.1, zfar=100.0)
             self.camera_node = self.pyrender_scene.add(camera, pose=np.eye(4))
             
             # Add directional light
@@ -213,7 +235,7 @@ class AlbedoDataPreparer:
             # Compute camera distance
             bbox_radius = scene_for_pyrender.bounding_sphere.primitive.radius
             fov = np.pi / 3.0
-            self.base_camera_distance = bbox_radius / np.tan(fov / 2) * 1.8
+            self.base_camera_distance = 1.5
             
             print("Pyrender scene setup complete")
             

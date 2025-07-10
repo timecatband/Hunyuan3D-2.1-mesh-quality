@@ -141,11 +141,11 @@ def main():
     if hasattr(train_module.pipeline.unet, "enable_attention_slicing"):
         train_module.pipeline.unet.enable_attention_slicing()
     # 2) Cast major components to FP16
-    train_module.unet.half()
-    train_module.pipeline.vae.half()
-    train_module.pipeline.text_encoder.half()
-    if hasattr(train_module, "dino_v2"):
-        train_module.dino_v2.half()
+    #train_module.unet.half()
+    #train_module.pipeline.vae.half()
+    #train_module.pipeline.text_encoder.half()
+    #if hasattr(train_module, "dino_v2"):
+    #    train_module.dino_v2.half()
 
     enable_gradient_checkpointing = True  # Set to True to enable gradient checkpointing
     if enable_gradient_checkpointing:
@@ -191,10 +191,10 @@ def main():
             # step optimizer every accum_steps
             if (step + 1) % args.accum_steps == 0 or (step + 1) == len(dataloader):
                 # compute grad norm with scaler
-                #scaler.unscale_(optimizer)
-                #grad_norm = torch.nn.utils.clip_grad_norm_(
-                #    train_module.unet.parameters(), max_norm=1e9
-                #)
+                scaler.unscale_(optimizer)
+                grad_norm = torch.nn.utils.clip_grad_norm_(
+                    train_module.unet.parameters(), max_norm=1e9
+                )
                 scaler.step(optimizer)
                 scaler.update()
                 optimizer.zero_grad()
