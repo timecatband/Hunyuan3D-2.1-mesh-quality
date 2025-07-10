@@ -142,17 +142,24 @@ class TextureDataset(BaseDataset):
                 
         condition_dict["images_cond"] = torch.stack(images_ref, dim=0).float()
 
+        enable_condition_augment = False
         for i, image_gen in enumerate(images_gen):
-            images_albedo.append(self.augment_image(self.load_image(image_gen, bg_gray)[0], bg_gray))
-            images_mr.append(
-                self.augment_image(self.load_image(image_gen.replace("_albedo", "_mr"), bg_gray)[0], bg_gray)
-            )
-            images_normal.append(
-                self.augment_image(self.load_image(image_gen.replace("_albedo", "_normal"), bg_gray)[0], bg_gray)
-            )
-            images_position.append(
-                self.augment_image(self.load_image(image_gen.replace("_albedo", "_pos"), bg_gray)[0], bg_gray)
-            )
+            if enable_condition_augment:
+                images_albedo.append(self.augment_image(self.load_image(image_gen, bg_gray)[0], bg_gray))
+                images_mr.append(
+                    self.augment_image(self.load_image(image_gen.replace("_albedo", "_mr"), bg_gray)[0], bg_gray)
+                )
+                images_normal.append(
+                    self.augment_image(self.load_image(image_gen.replace("_albedo", "_normal"), bg_gray)[0], bg_gray)
+                )
+                images_position.append(
+                    self.augment_image(self.load_image(image_gen.replace("_albedo", "_pos"), bg_gray)[0], bg_gray)
+                )
+            else:
+                images_albedo.append(self.load_image(image_gen, bg_gray)[0])
+                images_mr.append(self.load_image(image_gen.replace("_albedo", "_mr"), bg_gray)[0])
+                images_normal.append(self.load_image(image_gen.replace("_albedo", "_normal"), bg_gray)[0])
+                images_position.append(self.load_image(image_gen.replace("_albedo", "_pos"), bg_gray)[0])
 
         condition_dict["images_albedo"] = torch.stack(images_albedo, dim=0).float()
         condition_dict["images_mr"] = torch.stack(images_mr, dim=0).float()
