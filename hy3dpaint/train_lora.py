@@ -27,22 +27,45 @@ from pathlib import Path
 from datetime import datetime
 import shutil
 import gc
+from torchvision.transforms import v2
+
 
 SD_TARGET_MODULES = [
-    "to_q",
-    "to_k",
-    "to_v",
-    "proj",
-    "proj_in",
-    "proj_out",
-    "conv",
-    "conv1",
-    "conv2",
-    "conv_shortcut",
-    "to_out.0",
+    # Standard attention modules
+    "to_q", "to_k", "to_v", "to_out.0",
+    
+    # MR-specific attention modules (CRITICAL - these were missing!)
+    "to_q_mr", "to_k_mr", "to_v_mr", "to_out_mr.0",
+    
+    # Multiview attention modules (CRITICAL - these were missing!)
+    "attn_multiview.to_q", "attn_multiview.to_k", "attn_multiview.to_v",
+    
+    # Reference view attention modules (CRITICAL - these were missing!)
+    "attn_refview.to_q", "attn_refview.to_k", "attn_refview.to_v",
+    "attn_refview.processor.to_v_mr",  # This is MR-specific!
+    
+    # DINO attention modules (CRITICAL - these were missing!)
+    "attn_dino.to_q", "attn_dino.to_k", "attn_dino.to_v",
+    
+    # Processor modules
+    "processor.to_q_mr", "processor.to_k_mr", "processor.to_v_mr",
+    
+    # Projection modules
+    "proj_in", "proj_out", "proj",
+    
+    # Feed-forward networks
+    "ff.net.0.proj", "ff.net.2",
+    
+    # Convolution modules
+    "conv", "conv1", "conv2", "conv_shortcut",
+    
+    # Time embedding
     "time_emb_proj",
-    "ff.net.2",
+    
+    # DINO projection (if present)
+    "image_proj_model_dino.proj"
 ]
+
 
 # Optional imports with graceful fallback
 try:
@@ -147,7 +170,6 @@ class TrainingWrapper:
         cond_imgs, cond_imgs_another = images_cond[:, 0:1, ...], images_cond[:, 1:2, ...]
         
         # Resize to view_size
-        from torchvision.transforms import v2
         cond_imgs = v2.functional.resize(cond_imgs, self.view_size, interpolation=3, antialias=True).clamp(0, 1)
         cond_imgs_another = v2.functional.resize(cond_imgs_another, self.view_size, interpolation=3, antialias=True).clamp(0, 1)
         
@@ -285,9 +307,10 @@ class TrainingWrapper:
         # The shading_embeds should be in format: (B, N_pbr, seq_len, embed_dim)
         # Keep the 4D format since we have both albedo and MR tokens
         
+        # CRITICAL FIX: Pass original timesteps (B,), not expanded t_flat
         noise_pred = self.pipeline.unet(
             noisy_latents,  # Pass the 6D tensor: (B, N_pbr, N_gen, C, H, W)
-            t_flat,              # Pass the original timesteps: (B,) - UNet handles internal expansion
+            t,              # Pass the original timesteps with shape (B,)
             encoder_hidden_states=shading_embeds,
             **cached_condition  # Pass all cached condition as kwargs like in forward_unet
         )
@@ -311,25 +334,38 @@ class TrainingWrapper:
         
         # Proper v-prediction loss computation
         if self.train_scheduler.config.prediction_type == "v_prediction":
-            # Compute v-targets properly like in model.py
-            gen_flat = gen_latents.view(-1, C, H, W)
-            v_target = self.get_v(gen_flat, noise_flat, t_flat)
-            v_target_reshaped = v_target.view(B, N_pbr, N_gen, C, H, W)
-            v_target_albedo = v_target_reshaped[:, 0, :, :, :, :]
-            v_target_mr = v_target_reshaped[:, 1, :, :, :, :]
+            # CRITICAL FIX: Compute v-target separately for albedo and MR with correct timesteps
+            # Albedo v-target
+            albedo_flat = albedo_latents.view(-1, C, H, W)  # (B*N_gen, C, H, W)
+            albedo_noise_flat = noise[:, 0, :, :, :, :].contiguous().view(-1, C, H, W)  # (B*N_gen, C, H, W)
+            t_albedo = t.unsqueeze(1).repeat(1, N_gen).view(-1)  # (B*N_gen,)
             
-            # Compute losses for both albedo and MR (even if only training albedo)
-            albedo_loss = F.mse_loss(noise_pred_albedo.view(-1, C, H, W), v_target_albedo.view(-1, C, H, W))
+            v_target_albedo_flat = self.get_v(albedo_flat, albedo_noise_flat, t_albedo)
+            v_target_albedo = v_target_albedo_flat.view(B, N_gen, C, H, W)
+            
+            # MR v-target (use same timesteps)
+            mr_flat = mr_latents.view(-1, C, H, W)  # (B*N_gen, C, H, W)
+            mr_noise_flat = noise[:, 1, :, :, :, :].contiguous().view(-1, C, H, W)  # (B*N_gen, C, H, W)
+            t_mr = t.unsqueeze(1).repeat(1, N_gen).view(-1)  # (B*N_gen,)
+            
+            v_target_mr_flat = self.get_v(mr_flat, mr_noise_flat, t_mr)
+            v_target_mr = v_target_mr_flat.view(B, N_gen, C, H, W)
+            
+            # Compute losses
+            albedo_loss = F.mse_loss(
+                noise_pred_albedo.contiguous().view(-1, C, H, W), 
+                v_target_albedo.contiguous().view(-1, C, H, W)
+            )
             
             if self.mr_loss_enabled:
-                mr_loss = F.mse_loss(noise_pred_mr.view(-1, C, H, W), v_target_mr.view(-1, C, H, W))
+                mr_loss = F.mse_loss(
+                    noise_pred_mr.contiguous().view(-1, C, H, W),
+                    v_target_mr.contiguous().view(-1, C, H, W)
+                )
             else:
-                # Use dummy MR loss if not training MR
                 mr_loss = torch.tensor(0.0, device=self.device)
-            
-            # Apply the same loss weighting as model.py
+
             loss = self.albedo_loss_lambda * albedo_loss + (1.0 - self.albedo_loss_lambda) * mr_loss
-            
         else:
             # Epsilon prediction (standard noise prediction)
             albedo_loss = F.mse_loss(noise_pred_albedo.view(-1, C, H, W), noise_target_albedo.view(-1, C, H, W))
@@ -494,11 +530,11 @@ class LoraTrainer:
         )
         
         # Set up the scheduler
-        from diffusers import UniPCMultistepScheduler
-        pipeline.scheduler = UniPCMultistepScheduler.from_config(
-            pipeline.scheduler.config, timestep_spacing="trailing"
-        )
-        pipeline.set_progress_bar_config(disable=True)
+        #from diffusers import UniPCMultistepScheduler
+        #pipeline.scheduler = UniPCMultistepScheduler.from_config(
+            #pipeline.scheduler.config, timestep_spacing="trailing"
+        #)
+        #pipeline.set_progress_bar_config(disable=True)
         
         # Enable gradient checkpointing to reduce memory usage
         if hasattr(pipeline.unet, 'enable_gradient_checkpointing'):
@@ -579,19 +615,38 @@ class LoraTrainer:
             raise ImportError("PEFT is required for LORA training. Install with: pip install peft")
             
         print("Setting up LORA adapter...")
-        
+
+        # Add debugging to see actual module names
+        def print_unet_modules(model):
+            """Print all module names in the UNet for debugging"""
+            print("UNet module names:")
+            for name, module in model.named_modules():
+                if any(target in name for target in ["to_q", "to_k", "to_v", "proj", "conv"]):
+                    print(f"  {name}")
+
+        # In setup_lora method, before applying LORA:
+        #print_unet_modules(self.model.unet)        
+                
         # Define LORA config
         lora_config = LoraConfig(
             r=self.lora_rank,
             lora_alpha=self.lora_alpha,
-            target_modules=SD_TARGET_MODULES,
+            target_modules= SD_TARGET_MODULES,
             lora_dropout=self.lora_dropout,
             bias="none",
         )
         
-        # Apply LORA to UNet
-        self.model.unet = get_peft_model(self.model.unet, lora_config)
+        # Apply LORA to the *inner* UNet model of the main generator
+        peft_unet_main = get_peft_model(self.model.unet, lora_config)
+        #print("self.model.unet.unet:", self.model.unet.unet)
+        self.model.unet = peft_unet_main
         
+        # Also apply LORA to the inner UNet of the dual-stream feature extractor
+        #if hasattr(self.model.unet, 'unet_dual'):
+            #print("Applying LORA to dual-stream UNet...")
+            #peft_unet_dual = get_peft_model(self.model.unet.unet_dual, lora_config)
+            #self.model.unet.unet_dual = peft_unet_dual
+
         # Enable training mode for LORA parameters only
         self.model.unet.train()
 
@@ -641,18 +696,32 @@ class LoraTrainer:
         """Setup optimizer and learning rate scheduler."""
         print("Setting up optimizer...")
         
-        # Get trainable parameters
-        trainable_params = [*self.model.unet.parameters()]
+        # Get trainable parameters - CRITICAL: Use PEFT's built-in filtering
+        # This ensures only LoRA parameters are trainable, not the base model parameters
+        trainable_params = list(filter(lambda p: p.requires_grad, self.model.unet.parameters()))
         
+        # Debug: Print parameter info
+        total_params = sum(p.numel() for p in self.model.unet.parameters())
+        trainable_param_count = sum(p.numel() for p in trainable_params)
+        print(f"Total UNet parameters: {total_params:,}")
+        print(f"Trainable parameters: {trainable_param_count:,}")
+        print(f"Trainable percentage: {100 * trainable_param_count / total_params:.2f}%")
+        
+        # Additional validation: ensure we're not training the full model
+        if trainable_param_count > total_params * 0.1:  # More than 10% seems suspicious for LoRA
+            print(f"WARNING: Training {trainable_param_count:,} parameters ({100 * trainable_param_count / total_params:.1f}%)")
+            print("This seems high for LoRA training. Check PEFT configuration.")
+        
+        # TODO: Disabled for now
         # If using learned text clip, also include those parameters in training
-        if hasattr(self.model.unet, 'use_learned_text_clip') and self.model.unet.use_learned_text_clip:
-            for param_name in dir(self.model.unet):
-                if param_name.startswith('learned_text_clip_'):
-                    param = getattr(self.model.unet, param_name)
-                    if isinstance(param, torch.nn.Parameter):
-                        param.requires_grad = True
-                        trainable_params.append(param)
-                        print(f"Added {param_name} to trainable parameters")
+        #if hasattr(self.model.unet, 'use_learned_text_clip') and self.model.unet.use_learned_text_clip:
+        #    for param_name in dir(self.model.unet):
+        #        if param_name.startswith('learned_text_clip_'):
+        #            param = getattr(self.model.unet, param_name)
+        #            if isinstance(param, torch.nn.Parameter):
+        #                param.requires_grad = True
+        #                trainable_params.append(param)
+        #                print(f"Added {param_name} to trainable parameters")
         
         # Create optimizer
         if self.use_prodigy:
@@ -923,17 +992,18 @@ class LoraTrainer:
                 loss_dict = self.training_step(batch)
                 epoch_loss += loss_dict["loss_total"]
                 num_batches += 1
-                
+                grad_norm = None
                 # Gradient accumulation
                 if (step + 1) % self.gradient_accumulation_steps == 0:
                     # Gradient clipping
                     if self.mixed_precision:
                         self.scaler.unscale_(self.optimizer)
                     
-                    torch.nn.utils.clip_grad_norm_(
+                    grad_norm = torch.nn.utils.clip_grad_norm_(
                         [p for p in self.model.unet.parameters() if p.requires_grad], 
                         self.max_grad_norm
                     )
+                    grad_norm = grad_norm.item()
                     
                     # Optimizer step
                     if self.mixed_precision:
@@ -945,18 +1015,16 @@ class LoraTrainer:
                     self.lr_scheduler.step()
                     self.optimizer.zero_grad()
                     self.global_step += 1
-                    
-                    # Clear cache periodically to prevent memory buildup
-                    if self.global_step % 10 == 0:
-                        torch.cuda.empty_cache()
-                        gc.collect()
-                        print(f"Step {self.global_step}: out of step {len(self.dataloader)}")
 
+                    
                 # Update progress bar
                 avg_loss = epoch_loss / num_batches
+                if grad_norm is None:
+                    grad_norm = 0.0
                 progress_bar.set_postfix({
                     "loss": f"{avg_loss:.4f}",
-                    "lr": f"{self.lr_scheduler.get_last_lr()[0]:.2e}"
+                    "lr": f"{self.lr_scheduler.get_last_lr()[0]:.2e}",
+                    "grad_norm": f"{grad_norm:.5f}"
                 })
                 
                 # Log to wandb
@@ -965,7 +1033,8 @@ class LoraTrainer:
                         "train/loss": loss_dict["loss_total"],
                         "train/learning_rate": self.lr_scheduler.get_last_lr()[0],
                         "train/epoch": epoch,
-                        "train/global_step": self.global_step
+                        "train/global_step": self.global_step,
+                        "train/grad_norm": grad_norm.item()
                     })
             
             # Save checkpoint

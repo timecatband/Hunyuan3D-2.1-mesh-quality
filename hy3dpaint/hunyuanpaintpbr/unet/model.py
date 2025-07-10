@@ -44,9 +44,15 @@ def extract_into_tensor(a, t, x_shape):
 
 
 class HunyuanPaint(pl.LightningModule):
+    @property
+    def device(self):
+        # ensure self.device returns the device of the network parameters
+        return next(self.parameters()).device
+
     def __init__(
         self,
-        stable_diffusion_config,
+        stable_diffusion_config=None,
+        pretrained_pipeline = None,
         control_net_config=None,
         num_view=6,
         view_size=320,
@@ -77,11 +83,16 @@ class HunyuanPaint(pl.LightningModule):
         self.pbr_settings = pbr_settings
 
         # init modules
-        pipeline = DiffusionPipeline.from_pretrained(**stable_diffusion_config)
+
+        if pretrained_pipeline is None:
+            pipeline = DiffusionPipeline.from_pretrained(**stable_diffusion_config)
+        else:
+            pipeline = pretrained_pipeline
         pipeline.set_pbr_settings(self.pbr_settings)
         pipeline.scheduler = EulerAncestralDiscreteScheduler.from_config(
             pipeline.scheduler.config, timestep_spacing="trailing"
         )
+
 
         self.with_normal_map = with_normal_map
         self.with_position_map = with_position_map
@@ -120,6 +131,7 @@ class HunyuanPaint(pl.LightningModule):
             self.dino_v2 = self.dino_v2.bfloat16()
 
         self.validation_step_outputs = []
+        
 
     def register_schedule(self):
 
@@ -181,7 +193,7 @@ class HunyuanPaint(pl.LightningModule):
 
         images_normal = None
         if "images_normal" in batch:
-            images_normal = batch["images_normal"]  # (B, N, C, H, W)
+            images_normal = batch["images_normal"].to(self.device)  # (B, N, C, H, W)
             images_normal = v2.functional.resize(images_normal, self.view_size, interpolation=3, antialias=True).clamp(
                 0, 1
             )
@@ -189,7 +201,7 @@ class HunyuanPaint(pl.LightningModule):
 
         images_position = None
         if "images_position" in batch:
-            images_position = batch["images_position"]  # (B, N, C, H, W)
+            images_position = batch["images_position"].to(self.device)  # (B, N, C, H, W)
             images_position = v2.functional.resize(
                 images_position, self.view_size, interpolation=3, antialias=True
             ).clamp(0, 1)
@@ -294,7 +306,7 @@ class HunyuanPaint(pl.LightningModule):
             - extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x.shape) * x
         )
 
-    def training_step(self, batch, batch_idx):
+    def training_step(self, batch, batch_idx, supervise_mr=True):
         """Performs a single training step with both conditioning paths.
 
         Implements:
@@ -337,8 +349,9 @@ class HunyuanPaint(pl.LightningModule):
         shading_embeds = torch.stack(all_shading_tokens, dim=1)
 
         if self.unet.use_dino:
-            dino_hidden_states = self.dino_v2(cond_imgs[:, :1, ...])
-            dino_hidden_states_another = self.dino_v2(cond_imgs_another[:, :1, ...])
+            with torch.no_grad():
+                dino_hidden_states = self.dino_v2(cond_imgs[:, :1, ...])
+                dino_hidden_states_another = self.dino_v2(cond_imgs_another[:, :1, ...])
 
         gen_latents = rearrange(gen_latents, "b n_pbrs n c h w -> (b n_pbrs n) c h w")
         noise = torch.randn_like(gen_latents).to(self.device)
@@ -421,7 +434,10 @@ class HunyuanPaint(pl.LightningModule):
             )
 
             albedo_loss_1, _ = self.compute_loss(v_pred_albedo, v_target_albedo)
-            mr_loss_1, _ = self.compute_loss(v_pred_mr, v_target_mr)
+            if supervise_mr:
+                mr_loss_1, _ = self.compute_loss(v_pred_mr, v_target_mr)
+            else:
+                mr_loss_1 = torch.tensor(0.0, device=self.device)
 
             cached_condition["ref_latents"] = ref_latents_another
             cached_condition["dino_hidden_states"] = dino_hidden_states_another
@@ -438,7 +454,10 @@ class HunyuanPaint(pl.LightningModule):
             )
 
             albedo_loss_2, _ = self.compute_loss(v_pred_another_albedo, v_target_albedo)
-            mr_loss_2, _ = self.compute_loss(v_pred_another_mr, v_target_mr)
+            if supervise_mr:
+                mr_loss_2, _ = self.compute_loss(v_pred_another_mr, v_target_mr)
+            else:
+                mr_loss_2 = torch.tensor(0.0, device=self.device)
 
             consistency_loss, _ = self.compute_loss(v_pred_another, v_pred)
 
@@ -453,6 +472,7 @@ class HunyuanPaint(pl.LightningModule):
             loss_dict = log_loss_dict
 
         elif self.train_scheduler.config.prediction_type == "epsilon":
+            print("Using epsilon prediction")
             e_pred = self.forward_unet(latents_noisy, t, **cached_condition)
             loss, loss_dict = self.compute_loss(e_pred, noise)
         else:

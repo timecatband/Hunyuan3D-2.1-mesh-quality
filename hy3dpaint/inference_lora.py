@@ -9,6 +9,7 @@ import os
 import sys
 import argparse
 import torch
+import json
 from PIL import Image
 from pathlib import Path
 
@@ -72,14 +73,57 @@ class LoraInferencePipeline:
             
         print(f"Loading LORA adapter from: {self.lora_checkpoint_path}")
         
-        # Load LORA adapter into the UNet
-        unet = self.paint_pipeline.models["multiview_model"].pipeline.unet
-        self.lora_unet = PeftModel.from_pretrained(unet, self.lora_checkpoint_path)
+        # --- Main Generator UNet ---
+        # Get the inner UNet, which is the actual target for LoRA modifications
+        inner_unet_main = self.paint_pipeline.models["multiview_model"].pipeline.unet
         
-        # Replace the UNet in the pipeline
-        self.paint_pipeline.models["multiview_model"].pipeline.unet = self.lora_unet
+        # Load the LoRA weights into the inner UNet using PeftModel.
+        lora_unet_main = PeftModel.from_pretrained(inner_unet_main, self.lora_checkpoint_path)
+        
+        # Merge the LoRA weights into the base model.
+        print("Merging LoRA adapter into main generator UNet...")
+        lora_unet_main.merge_and_unload()
         
         print("LORA adapter loaded successfully")
+        
+    def get_training_config(self):
+        """Load the training configuration if available."""
+        config_file = self.lora_checkpoint_path / "training_config.json"
+        
+        if config_file.exists():
+            with open(config_file, 'r') as f:
+                config = json.load(f)
+            print("✓ Training configuration loaded:")
+            for key, value in config.items():
+                print(f"  - {key}: {value}")
+            return config
+        else:
+            print("No training config found")
+            return {}
+    
+    def verify_model_state(self):
+        """Verify the model is properly configured with LORA."""
+        print("\n=== Model State Verification ===")
+        
+        unet = self.paint_pipeline.models["multiview_model"].pipeline.unet
+        
+        # Check LORA status
+        if hasattr(unet, 'peft_config'):
+            print(f"✓ LORA adapter detected: {list(unet.peft_config.keys())}")
+            for adapter_name, config in unet.peft_config.items():
+                print(f"  - {adapter_name}: rank={config.r}, alpha={config.lora_alpha}")
+        else:
+            print("⚠️ No LORA adapter detected")
+        
+        # Check built-in shading tokens
+        if hasattr(unet, 'pbr_setting'):
+            print("✓ Using built-in shading tokens:")
+            for token in unet.pbr_setting:
+                print(f"  - {token}")
+        else:
+            print("⚠️ No PBR settings found")
+        
+        print("=================================\n")
         
     def generate_texture(self, mesh_path: str, image_path: str, output_mesh_path: str = None):
         """
@@ -95,6 +139,12 @@ class LoraInferencePipeline:
         """
         print(f"Generating texture for mesh: {mesh_path}")
         print(f"Using reference image: {image_path}")
+        
+        # Load and display training config
+        training_config = self.get_training_config()
+        
+        # Verify model state before generation
+        self.verify_model_state()
         
         # Generate texture using the pipeline
         result_path = self.paint_pipeline(
@@ -203,4 +253,4 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+   sys.exit(main())
