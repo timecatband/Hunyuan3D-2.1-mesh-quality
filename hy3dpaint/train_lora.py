@@ -59,6 +59,13 @@ except ImportError:
     print("Warning: Weights & Biases not available. Install with: pip install wandb")
     WANDB_AVAILABLE = False
 
+try:
+    from prodigyopt import Prodigy
+    PRODIGY_AVAILABLE = True
+except ImportError:
+    print("Warning: Prodigy optimizer not available. Install with: pip install prodigyopt")
+    PRODIGY_AVAILABLE = False
+
 # Local imports
 from src.data.dataloader.objaverse_loader_forTexturePBR import TextureDataset
 from textureGenPipeline import Hunyuan3DPaintPipeline, Hunyuan3DPaintConfig
@@ -381,7 +388,9 @@ class LoraTrainer:
                  albedo_loss_lambda: float = 0.85,
                  enable_xformers: bool = True,
                  enable_sliced_vae: bool = True,
-                 cpu_offload: bool = False):
+                 cpu_offload: bool = False,
+                 use_prodigy: bool = False,
+                 prodigy_d_coef: float = 1.0):
         """
         Initialize the LORA trainer.
         
@@ -389,7 +398,7 @@ class LoraTrainer:
             dataset_json: Path to dataset JSON file
             output_dir: Directory to save outputs
             batch_size: Training batch size
-            learning_rate: Learning rate
+            learning_rate: Learning rate (for AdamW) or initial D coefficient (for Prodigy)
             num_epochs: Number of training epochs
             save_every: Save checkpoint every N epochs
             mixed_precision: Use mixed precision training
@@ -407,6 +416,8 @@ class LoraTrainer:
             enable_xformers: Enable xFormers memory efficient attention
             enable_sliced_vae: Enable sliced VAE decoding for memory efficiency
             cpu_offload: Enable CPU offloading for non-trainable components
+            use_prodigy: Use Prodigy optimizer instead of AdamW
+            prodigy_d_coef: D coefficient for Prodigy optimizer
         """
         self.dataset_json = dataset_json
         self.output_dir = Path(output_dir)
@@ -429,6 +440,8 @@ class LoraTrainer:
         self.enable_xformers = enable_xformers
         self.enable_sliced_vae = enable_sliced_vae
         self.cpu_offload = cpu_offload
+        self.use_prodigy = use_prodigy
+        self.prodigy_d_coef = prodigy_d_coef
         
         # Create output directory
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -629,7 +642,7 @@ class LoraTrainer:
         print("Setting up optimizer...")
         
         # Get trainable parameters
-        trainable_params = [p for p in self.model.unet.parameters() if p.requires_grad]
+        trainable_params = [*self.model.unet.parameters()]
         
         # If using learned text clip, also include those parameters in training
         if hasattr(self.model.unet, 'use_learned_text_clip') and self.model.unet.use_learned_text_clip:
@@ -642,24 +655,50 @@ class LoraTrainer:
                         print(f"Added {param_name} to trainable parameters")
         
         # Create optimizer
-        self.optimizer = AdamW(
-            trainable_params,
-            lr=self.learning_rate,
-            betas=(0.9, 0.999),
-            weight_decay=1e-2,
-            eps=1e-8
-        )
+        if self.use_prodigy:
+            if not PRODIGY_AVAILABLE:
+                raise ImportError("Prodigy optimizer is required but not available. Install with: pip install prodigyopt")
+            
+            print(f"Using Prodigy optimizer with D coefficient: {self.prodigy_d_coef}")
+            self.optimizer = Prodigy(
+                trainable_params,
+                lr=1.0,  # Prodigy automatically adapts learning rate
+                d_coef=self.prodigy_d_coef,
+                betas=(0.9, 0.99),
+                beta3=None,
+                weight_decay=1e-2,
+                eps=1e-8,
+                use_bias_correction=True,
+                safeguard_warmup=True
+            )
+        else:
+            print(f"Using AdamW optimizer with learning rate: {self.learning_rate}")
+            self.optimizer = AdamW(
+                trainable_params,
+                lr=self.learning_rate,
+                betas=(0.9, 0.999),
+                weight_decay=1e-2,
+                eps=1e-8
+            )
         
         # Create learning rate scheduler
         total_steps = len(self.dataloader) * self.num_epochs // self.gradient_accumulation_steps
-        self.lr_scheduler = CosineAnnealingLR(
-            self.optimizer,
-            T_max=total_steps,
-            eta_min=self.learning_rate * 0.1
-        )
+        
+        if self.use_prodigy:
+            # Prodigy typically doesn't need a learning rate scheduler
+            # But we can use a minimal one for logging purposes
+            from torch.optim.lr_scheduler import ConstantLR
+            self.lr_scheduler = ConstantLR(self.optimizer, factor=1.0, total_iters=1)
+            print(f"Using constant LR scheduler for Prodigy (total steps: {total_steps})")
+        else:
+            self.lr_scheduler = CosineAnnealingLR(
+                self.optimizer,
+                T_max=total_steps,
+                eta_min=self.learning_rate * 0.1
+            )
+            print(f"Using cosine annealing LR scheduler for AdamW (total steps: {total_steps})")
         
         print(f"Optimizer created with {len(trainable_params)} parameter groups")
-        print(f"Total training steps: {total_steps}")
         
     def setup_logging(self):
         """Setup logging with Weights & Biases."""
@@ -954,7 +993,7 @@ def main():
     parser.add_argument("--batch_size", type=int, default=1,
                        help="Batch size for training (use 1 for memory constrained setups)")
     parser.add_argument("--learning_rate", type=float, default=1e-4,
-                       help="Learning rate")
+                       help="Learning rate for AdamW or initial D coefficient for Prodigy")
     parser.add_argument("--num_epochs", type=int, default=5,
                        help="Number of training epochs")
     parser.add_argument("--save_every", type=int, default=1,
@@ -993,6 +1032,10 @@ def main():
                        help="Disable sliced VAE decoding")
     parser.add_argument("--cpu_offload", action="store_true",
                        help="Enable CPU offloading for non-trainable components (saves GPU memory)")
+    parser.add_argument("--use_prodigy", action="store_true",
+                       help="Use Prodigy optimizer instead of AdamW (automatically adapts learning rate)")
+    parser.add_argument("--prodigy_d_coef", type=float, default=1.0,
+                       help="D coefficient for Prodigy optimizer (controls adaptation speed)")
     
     args = parser.parse_args()
     
@@ -1023,7 +1066,9 @@ def main():
         albedo_loss_lambda=args.albedo_loss_lambda,
         enable_xformers=args.enable_xformers and not args.disable_xformers,
         enable_sliced_vae=args.enable_sliced_vae and not args.disable_sliced_vae,
-        cpu_offload=args.cpu_offload
+        cpu_offload=args.cpu_offload,
+        use_prodigy=args.use_prodigy,
+        prodigy_d_coef=args.prodigy_d_coef
     )
     
     # Start training
