@@ -1,17 +1,3 @@
-# Hunyuan 3D is licensed under the TENCENT HUNYUAN NON-COMMERCIAL LICENSE AGREEMENT
-# except for the third-party components listed below.
-# Hunyuan 3D does not impose any additional limitations beyond what is outlined
-# in the repsective licenses of these third-party components.
-# Users must comply with all terms and conditions of original licenses of these third-party
-# components and must ensure that the usage of the third party components adheres to
-# all relevant laws and regulations.
-
-# For avoidance of doubts, Hunyuan 3D means the large language models and
-# their software and algorithms, including trained model weights, parameters (including
-# optimizer states), machine-learning model code, inference-enabling code, training-enabling code,
-# fine-tuning enabling code and other elements of the foregoing made publicly available
-# by Tencent in accordance with TENCENT HUNYUAN COMMUNITY LICENSE AGREEMENT.
-
 try:
     from utils.torchvision_fix import apply_fix
     apply_fix()
@@ -24,6 +10,7 @@ from textureGenPipeline import Hunyuan3DPaintPipeline, Hunyuan3DPaintConfig
 import sys
 from hunyuanpaintpbr.unet.model import HunyuanPaint
 import peft
+from peft import PeftModel  # Add import for resuming LoRA
 from src.data.dataloader.objaverse_loader_forTexturePBR import TextureDataset
 import argparse
 import os
@@ -31,6 +18,13 @@ import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 import gc
+
+# Add Prodigy optimizer support
+try:
+    from prodigyopt import Prodigy  # type: ignore
+    PRODIGY_AVAILABLE = True
+except ImportError:
+    PRODIGY_AVAILABLE = False
 
 SD_TARGET_MODULES = [
     # Standard attention modules
@@ -83,16 +77,16 @@ def convert_to_training_module(paint_pipeline):
     del paint_pipeline
     return pipeline
 
-def setup_lora(pipeline):
+def setup_lora(pipeline, lora_rank):
     lora_config = peft.LoraConfig(
-        r=8,
+        r=lora_rank,
         lora_alpha=16,
         target_modules=SD_TARGET_MODULES,
         lora_dropout=0.05,
         bias="none",
     )
     pipeline.unet = peft.get_peft_model(pipeline.unet, lora_config)
-    print("LORA configuration applied to UNet")
+    print(f"LORA configuration applied with rank {lora_rank}")
 
 def load_dataset(json_path):
     dataset = TextureDataset(json_path=json_path, num_view=6, image_size=512, lighting_suffix_pool=["light_PL", "light_AL", "light_ENVMAP", "light_KEY"])
@@ -110,6 +104,16 @@ def parse_args():
     parser.add_argument("--accum_steps",   type=int, default=1)
     parser.add_argument("--resolution",    type=int, default=512,
                         help="training image resolution, e.g. 256/320/512")
+    # Prodigy optimizer options
+    parser.add_argument("--use_prodigy", action="store_true",
+                        help="Use Prodigy optimizer for training")
+    parser.add_argument("--prodigy_d_coef", type=float, default=1.0,
+                        help="Prodigy D coefficient for optimizer")
+    # LoRA training options
+    parser.add_argument("--lora_rank", type=int, default=8,
+                        help="LoRA rank for adapter")
+    parser.add_argument("--resume_from", type=str, default=None,
+                        help="Path to LoRA checkpoint directory to resume from")
     return parser.parse_args()
 
 def main():
@@ -119,7 +123,13 @@ def main():
     paint_pipeline = load_pretrained_pipeline(max_num_view=6,
                                               resolution=args.resolution)
     train_module   = convert_to_training_module(paint_pipeline)
-    setup_lora(train_module)
+    setup_lora(train_module, args.lora_rank)
+    
+    # Resume from existing LoRA checkpoint if provided
+    if args.resume_from:
+        print(f"Resuming LoRA weights from {args.resume_from}")
+        train_module.unet = PeftModel.from_pretrained(train_module.unet, args.resume_from)
+
     dataset        = load_dataset(args.json_path)
     dataloader     = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=1, pin_memory=False)
 
@@ -162,7 +172,26 @@ def main():
         if "unet" not in name:
             param.requires_grad_(False)
 
-    optimizer = torch.optim.AdamW(train_module.unet.parameters(), lr=args.lr)
+    # Setup optimizer
+    if args.use_prodigy:
+        if not PRODIGY_AVAILABLE:
+            raise ImportError("Prodigy optimizer is required but not available. Install with: pip install prodigyopt")
+        print(f"Using Prodigy optimizer with D coefficient: {args.prodigy_d_coef}")
+        optimizer = Prodigy(
+            train_module.unet.parameters(),
+            lr=1.0,
+            d_coef=args.prodigy_d_coef,
+            betas=(0.9, 0.99),
+            beta3=None,
+            weight_decay=1e-2,
+            eps=1e-8,
+            use_bias_correction=True,
+            safeguard_warmup=True
+        )
+    else:
+        print(f"Using AdamW optimizer with learning rate: {args.lr}")
+        optimizer = torch.optim.AdamW(train_module.unet.parameters(), lr=args.lr)
+
     # Print number of trainable parameters
     trainable_params = sum(p.numel() for p in train_module.unet.parameters() if p.requires_grad)
     print(f"Number of trainable parameters: {trainable_params}")

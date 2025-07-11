@@ -82,7 +82,7 @@ class LoraInferencePipeline:
         
         # Merge the LoRA weights into the base model.
         print("Merging LoRA adapter into main generator UNet...")
-        lora_unet_main.merge_and_unload()
+        self.paint_pipeline.models["multiview_model"].pipeline.unet = lora_unet_main.merge_and_unload()
         
         print("LORA adapter loaded successfully")
         

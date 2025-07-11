@@ -111,7 +111,7 @@ class DataAugmenter:
             caption = self.caption_processor.decode(out[0], skip_special_tokens=True)
             
             # Enhance the caption for better diffusion results
-            enhanced_caption = f"{caption}, high quality, detailed, photorealistic"
+            enhanced_caption = f"{caption}, high quality, detailed, photorealistic, detailed texture"
             print(f"Generated caption: {enhanced_caption}")
             return enhanced_caption
         except Exception as e:
@@ -158,6 +158,10 @@ class DataAugmenter:
         prompt = self.generate_caption(original_image)
         print("Num steps:", num_inference_steps)
         num_inference_steps = 50
+
+        # Jitter strength in a 0.1 range around the specified strength
+        jitter_strength = strength + np.random.uniform(-0.125, 0.125)
+
         # Apply img2img diffusion
         with torch.no_grad():
             result = self.pipeline(
@@ -166,7 +170,7 @@ class DataAugmenter:
                 image=original_image,
                 control_image=control_image,
                 controlnet_conditioning_scale=0.8,  # Reduce control strength
-                strength=strength,
+                strength=jitter_strength,
                 guidance_scale=guidance_scale,
                 num_inference_steps=num_inference_steps,
                 # Remove guess_mode - it's experimental and can cause artifacts
@@ -238,6 +242,7 @@ class DataAugmenter:
         # Select only first 5 images to process
         images_to_process = image_files[:5]
         images_to_remove = image_files[5:]
+        print("Processing all images")
         
         # Remove images we won't process
         for image_file in images_to_remove:

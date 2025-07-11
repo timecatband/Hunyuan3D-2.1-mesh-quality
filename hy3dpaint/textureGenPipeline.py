@@ -131,6 +131,11 @@ class Hunyuan3DPaintPipeline:
             selected_camera_elevs, selected_camera_azims, use_abs_coor=True
         )
         position_maps = self.view_processor.render_position_multiview(selected_camera_elevs, selected_camera_azims)
+        #position_map_pil = position_maps[0].cpu().numpy()
+        #position_map_pil = (position_map_pil * 255).astype(np.uint8)
+        #position_map_pil = Image.fromarray(position_map_pil)
+        position_maps[0].save("positionmap.png")
+        normal_maps[0].save("normalmap.png")
 
         ##########  Style  ###########
         image_caption = "high quality"

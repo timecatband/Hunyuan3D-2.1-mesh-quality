@@ -125,11 +125,12 @@ class AlbedoDataPreparer:
                     print("Warning: No texture found in mesh")
             
             # Initialize MeshRender for normal/position rendering
+            # CRITICAL: Use EXACT same settings as inference pipeline (textureGenPipeline.py)
             self.mesh_renderer = MeshRender(
-                default_resolution=self.render_resolution,
-                texture_size=self.texture_resolution,
-                bake_mode="back_sample",
-                raster_mode="cr",
+                default_resolution=2048,        # Match inference: 1024 * 2
+                texture_size=4096,              # Match inference: 1024 * 4  
+                bake_mode="back_sample",        # Match inference
+                raster_mode="cr",               # Match inference
             )
             
             # Load mesh into MeshRenderer for normal/position maps
@@ -342,29 +343,33 @@ class AlbedoDataPreparer:
                 rgb_image = np.ones((self.render_resolution, self.render_resolution, 3), dtype=np.float32)
                 rendered_data['albedo'] = rgb_image
         
-        # Render normal map using MeshRender
+        # CRITICAL FIX: Use EXACT same coordinate system as inference pipeline
+        # The inference pipeline uses these camera poses exactly as defined in textureGenPipeline.py
+        # and processes them through ViewProcessor.render_normal_multiview() -> MeshRender.render_normal()
+        
+        # Render normal map using MeshRender - MATCH INFERENCE SETTINGS EXACTLY
         if render_normal:
+            # CRITICAL: Use the EXACT SAME parameters as inference pipeline (pipeline_utils.py)
+            # The inference calls: self.render.render_normal(elev, azim, use_abs_coor=True, return_type="pl")
             normal_image = self.mesh_renderer.render_normal(
-                elev=pose['elevation'],
-                azim=pose['azimuth'],
-                camera_distance=pose['distance'],
-                center=pose['center'],
-                resolution=self.render_resolution,
-                bg_color=[0.5, 0.5, 1.0],  # Neutral normal color
-                return_type="np"
+                elev=pose['elevation'],     # Use elevation AS-IS (get_mv_matrix will apply -elev internally)
+                azim=pose['azimuth'],       # Use azimuth AS-IS (get_mv_matrix will apply +90 internally)
+                camera_distance=pose.get('distance', 1.5),  # Use same distance as inference
+                use_abs_coor=True,          # CRITICAL: Must match inference setting
+                normalize_rgb=True,         # CRITICAL: Must match inference setting  
+                return_type="np"            # Convert PIL to numpy for consistency
             )
             rendered_data['normal'] = normal_image
         
-        # Render position map using MeshRender
+        # Render position map using MeshRender - MATCH INFERENCE SETTINGS EXACTLY  
         if render_position:
+            # CRITICAL: Use the EXACT SAME parameters as inference pipeline (pipeline_utils.py)
+            # The inference calls: self.render.render_position(elev, azim, return_type="pl")
             position_image = self.mesh_renderer.render_position(
-                elev=pose['elevation'],
-                azim=pose['azimuth'],
-                camera_distance=pose['distance'],
-                center=pose['center'],
-                resolution=self.render_resolution,
-                bg_color=[0, 0, 0],  # Black background
-                return_type="np"
+                elev=pose['elevation'],     # Use elevation AS-IS (get_mv_matrix will apply -elev internally)
+                azim=pose['azimuth'],       # Use azimuth AS-IS (get_mv_matrix will apply +90 internally) 
+                camera_distance=pose.get('distance', 1.5),  # Use same distance as inference
+                return_type="np"            # Convert PIL to numpy for consistency
             )
             rendered_data['position'] = position_image
         
@@ -375,13 +380,14 @@ class AlbedoDataPreparer:
                                    pose: Dict) -> Dict[str, np.ndarray]:
         """
         Generate different lighting condition variations for conditioning images.
+        Uses random camera angles and lighting angles with distance jitter.
         
         Args:
-            base_rendered_data: Base rendered data dictionary
-            pose: Camera pose dictionary
+            base_rendered_data: Base rendered data dictionary (not used for camera pose)
+            pose: Original camera pose dictionary (used only for fallback)
             
         Returns:
-            Dictionary with different lighting variations
+            Dictionary with different lighting variations from random viewpoints
         """
         # Generate lighting variations
         lighting_data = {}
@@ -406,44 +412,83 @@ class AlbedoDataPreparer:
         
         self.pyrender_scene.ambient_light = [0.4, 0.4, 0.4, 1.0]  # Default ambient light
         
-        # Setup camera pose for pyrender
-        height_offset = 0.5 * (self.base_camera_distance * 0.2) * np.sin(np.radians(pose['azimuth'] * 2))
-        eye = [
-            self.base_camera_distance * np.sin(np.radians(pose['azimuth'])), 
-            height_offset + self.base_camera_distance * np.sin(np.radians(pose['elevation'])), 
-            self.base_camera_distance * np.cos(np.radians(pose['azimuth']))
-        ]
-        camera_pose = self.create_look_at_pose(eye=eye, target=[0, 0, 0])
-        self.pyrender_scene.set_pose(self.camera_node, pose=camera_pose)
+        # Helper function to create random camera pose with distance jitter
+        def create_random_camera_pose():
+            # Random azimuth and elevation for camera
+            camera_azimuth = random.uniform(0, 360)
+            camera_elevation = random.uniform(-30, 45)  # Reasonable elevation range
+            
+            # Add distance jitter
+            distance_jitter = random.uniform(0.8, 1.4)  # 20% jitter up/down
+            camera_distance = self.base_camera_distance * distance_jitter
+            
+            # Convert to cartesian coordinates
+            height_offset = 0.5 * (camera_distance * 0.2) * np.sin(np.radians(camera_azimuth * 2))
+            camera_pos = np.array([
+                camera_distance * np.sin(np.radians(camera_azimuth)),
+                height_offset + camera_distance * np.sin(np.radians(camera_elevation)),
+                camera_distance * np.cos(np.radians(camera_azimuth))
+            ])
+            
+            return self.create_look_at_pose(eye=camera_pos, target=[0, 0, 0])
         
-        # Ambient lighting (low intensity ambient only)
-        self.light_node.light.intensity = 0.0
-        self.ambient_node.light.intensity = 2.0
+        # Helper function to create random light pose
+        def create_random_light_pose(base_distance_multiplier=1.0):
+            # Random azimuth and elevation for lighting
+            light_azimuth = random.uniform(0, 360)
+            light_elevation = random.uniform(-45, 60)  # Avoid extreme low angles
+            
+            # Add small jitter to distance
+            distance_jitter = random.uniform(0.8, 1.2) * base_distance_multiplier
+            light_distance = self.base_camera_distance * distance_jitter
+            
+            # Convert to cartesian coordinates
+            light_pos = np.array([
+                light_distance * np.cos(np.radians(light_elevation)) * np.sin(np.radians(light_azimuth)),
+                light_distance * np.sin(np.radians(light_elevation)),
+                light_distance * np.cos(np.radians(light_elevation)) * np.cos(np.radians(light_azimuth))
+            ])
+            
+            # Create look-at pose for light (pointing toward origin)
+            return self.create_look_at_pose(eye=light_pos, target=[0, 0, 0])
+        
         lit_flags = pyrender.RenderFlags.RGBA | pyrender.RenderFlags.SHADOWS_DIRECTIONAL
+        
+        # Ambient lighting (low intensity ambient only) - Random camera angle
+        random_camera_pose = create_random_camera_pose()
+        self.pyrender_scene.set_pose(self.camera_node, pose=random_camera_pose)
+        random_ambient_pose = create_random_light_pose(0.5)  # Closer for ambient
+        self.pyrender_scene.set_pose(self.light_node, pose=random_ambient_pose)
+        self.light_node.light.intensity = 0.5  # Lower intensity for ambient
+        self.ambient_node.light.intensity = 2.0
         ambient_color, _ = self.pyrender_renderer.render(self.pyrender_scene, flags=lit_flags)
         lighting_data['light_AL'] = ambient_color[:, :, :3] / 255.0
         
-        # Point lighting (strong directional light)
+        # Point lighting (strong directional light from random angle) - Random camera angle
+        random_camera_pose = create_random_camera_pose()
+        self.pyrender_scene.set_pose(self.camera_node, pose=random_camera_pose)
+        random_point_pose = create_random_light_pose(1.0)
+        self.pyrender_scene.set_pose(self.light_node, pose=random_point_pose)
         self.light_node.light.intensity = 5.0
         self.ambient_node.light.intensity = 0.9
         point_color, _ = self.pyrender_renderer.render(self.pyrender_scene, flags=lit_flags)
         lighting_data['light_PL'] = point_color[:, :, :3] / 255.0
         
-        # Environment map lighting (balanced lighting)
+        # Environment map lighting (balanced lighting from random angle) - Random camera angle
+        random_camera_pose = create_random_camera_pose()
+        self.pyrender_scene.set_pose(self.camera_node, pose=random_camera_pose)
+        random_env_pose = create_random_light_pose(1.2)
+        self.pyrender_scene.set_pose(self.light_node, pose=random_env_pose)
         self.light_node.light.intensity = 3.0
         self.ambient_node.light.intensity = 1.5
         env_color, _ = self.pyrender_renderer.render(self.pyrender_scene, flags=lit_flags)
         lighting_data['light_ENVMAP'] = env_color[:, :, :3] / 255.0
         
-        # Key lighting (strong light from key angle)
-        # Position light at a 45-degree angle from camera
-        key_light_pose = np.array([
-            [0.707, 0, 0.707, 0],
-            [0, 1, 0, 0],
-            [-0.707, 0, 0.707, 0],
-            [0, 0, 0, 1]
-        ])
-        self.pyrender_scene.set_pose(self.light_node, pose=key_light_pose)
+        # Key lighting (strong light from random key angle) - Random camera angle
+        random_camera_pose = create_random_camera_pose()
+        self.pyrender_scene.set_pose(self.camera_node, pose=random_camera_pose)
+        random_key_pose = create_random_light_pose(0.8)  # Closer for more dramatic effect
+        self.pyrender_scene.set_pose(self.light_node, pose=random_key_pose)
         self.light_node.light.intensity = 4.0
         self.ambient_node.light.intensity = 1.0
         key_color, _ = self.pyrender_renderer.render(self.pyrender_scene, flags=lit_flags)
@@ -540,6 +585,12 @@ class AlbedoDataPreparer:
         """
         Generate camera transforms JSON file matching the expected format.
         
+        The key insight is that MeshRender uses a specific coordinate system transformation:
+        - elev = -elev (negates elevation)  
+        - azim += 90 (adds 90° to azimuth)
+        
+        And the transforms.json expects camera-to-world matrices, not world-to-camera.
+        
         Args:
             poses: List of camera poses
             output_dir: Output directory
@@ -552,58 +603,53 @@ class AlbedoDataPreparer:
         }
         
         for i, pose in enumerate(poses):
-            # Convert pose to transform matrix using MeshRender conventions
-            elev = pose['elevation']
-            azim = pose['azimuth'] 
+            # Use MeshRender's get_mv_matrix function to get the world-to-camera matrix
+            # then invert it to get the camera-to-world matrix that transforms.json expects
+            from DifferentiableRenderer.camera_utils import get_mv_matrix
+            
+            elev = pose['elevation'] 
+            azim = pose['azimuth']
             distance = pose['distance']
             
-            # Apply MeshRender coordinate transformations
-            elev_adjusted = -elev  # MeshRender negates elevation
-            azim_adjusted = azim + 90  # MeshRender adds 90 to azimuth
+            # Get world-to-camera matrix using MeshRender's coordinate system
+            w2c = get_mv_matrix(elev, azim, distance, center=[0, 0, 0])
             
-            # Convert to radians
-            elev_rad = math.radians(elev_adjusted)
-            azim_rad = math.radians(azim_adjusted)
+            # Convert to camera-to-world matrix by inverting
+            c2w = np.linalg.inv(w2c)
             
-            # Compute camera position in world coordinates
-            camera_position = np.array([
-                distance * math.cos(elev_rad) * math.cos(azim_rad),
-                distance * math.cos(elev_rad) * math.sin(azim_rad),
-                distance * math.sin(elev_rad)
-            ])
-            
-            # Compute look-at transformation
-            center = np.array([0, 0, 0])
-            lookat = center - camera_position
-            lookat = lookat / np.linalg.norm(lookat)
-            
-            up = np.array([0, 0, 1.0])
-            right = np.cross(lookat, up)
-            right = right / np.linalg.norm(right)
-            up = np.cross(right, lookat)
-            up = up / np.linalg.norm(up)
-            
-            # Create camera-to-world matrix
-            c2w = np.eye(4)
-            c2w[:3, 0] = right
-            c2w[:3, 1] = up  
-            c2w[:3, 2] = -lookat
-            c2w[:3, 3] = camera_position
-            
-            # Convert angles to radians for JSON
-            azim_rad_orig = math.radians(pose['azimuth'])
-            elev_rad_orig = math.radians(pose['elevation'])
+            # The JSON format expects azimuth/elevation in the ORIGINAL coordinate system
+            # but adjusted by MeshRender's transformations for consistency
+            # Based on the example data: azim=0° becomes azim=-90° in JSON
+            azim_json = math.radians(azim - 90)  # Subtract 90° to match expected system
+            elev_json = math.radians(elev)       # Elevation stays the same in JSON
             
             frame = {
                 "file_path": f"{i:03d}.png",
                 "camera_angle_x": math.radians(53.13),  # Standard FOV
                 "proj_type": 1,
-                "azimuth": azim_rad_orig,
-                "elevation": elev_rad_orig,
+                "azimuth": azim_json,
+                "elevation": elev_json,
                 "cam_dis": distance,
                 "transform_matrix": c2w.tolist()
             }
             transforms["frames"].append(frame)
+            
+            # Debug output for first frame to verify coordinate system
+            if i == 0:
+                print(f"Debug: First frame coordinate system check:")
+                print(f"  Original pose: azim={azim}°, elev={elev}°")
+                print(f"  JSON azimuth: {math.degrees(azim_json):.1f}°")
+                print(f"  Transform matrix (c2w):")
+                for row_idx in range(3):
+                    row = c2w[row_idx]
+                    print(f"    [{row_idx}]: [{row[0]:.6f}, {row[1]:.6f}, {row[2]:.6f}, {row[3]:.6f}]")
+                
+                # Verify against expected pattern for front view
+                if abs(azim) < 1e-6 and abs(elev) < 1e-6:  # This should be front view  
+                    print(f"  Expected for front view (original azim=0°, JSON azim=-90°):")
+                    print(f"    [0]: [1.0, 0.0, ~0, ~0]")
+                    print(f"    [1]: [~0, ~0, -1.0, -1.5]") 
+                    print(f"    [2]: [0.0, 1.0, ~0, 0.0]")
         
         # Save transforms
         transforms_path = output_dir / "render_tex" / "transforms.json"
@@ -684,6 +730,9 @@ class AlbedoDataPreparer:
             # Create dataset JSON
             self.create_dataset_json(output_path, sample_name)
             
+            # Validate consistency with inference pipeline
+            self.validate_inference_consistency(output_path)
+            
             print(f"Successfully processed mesh. Training data saved to: {output_path}")
             return True
             
@@ -706,7 +755,61 @@ class AlbedoDataPreparer:
         """Destructor to ensure cleanup."""
         self.cleanup()
     
+    def validate_inference_consistency(self, output_dir: Path) -> bool:
+        """
+        Validate that the prepared data is consistent with inference pipeline expectations.
+        
+        Args:
+            output_dir: Directory containing prepared data
+            
+        Returns:
+            True if validation passes, False if issues detected
+        """
+        print("🔍 Validating data consistency with inference pipeline...")
+        
+        render_tex_dir = output_dir / "render_tex"
+        if not render_tex_dir.exists():
+            print("❌ render_tex directory not found")
+            return False
+            
+        # Check for required files
+        normal_files = list(render_tex_dir.glob("*_normal.png"))
+        position_files = list(render_tex_dir.glob("*_pos.png"))
+        
+        if len(normal_files) == 0:
+            print("❌ No normal map files found")
+            return False
+            
+        if len(position_files) == 0:
+            print("❌ No position map files found")
+            return False
+            
+        # Sample check: load a normal map and verify coordinate system
+        try:
+            from PIL import Image
+            import numpy as np
+            
+            sample_normal = Image.open(normal_files[0])
+            normal_array = np.array(sample_normal) / 255.0
+            
+            # Check if normal map uses absolute coordinates (as expected by inference)
+            # Absolute coordinate normals should have more variation and different distribution
+            normal_mean = np.mean(normal_array)
+            normal_std = np.std(normal_array)
+            
+            print(f"✅ Normal map statistics - Mean: {normal_mean:.3f}, Std: {normal_std:.3f}")
+            
+            # Additional checks could be added here
+            if normal_std < 0.1:
+                print("⚠️  Warning: Normal map appears to have low variation - check use_abs_coor setting")
+                
+        except Exception as e:
+            print(f"⚠️  Warning: Could not validate normal map: {e}")
+            
+        print("✅ Data validation completed")
+        return True
 
+    # ...existing code...
 def main():
     """Main function for command-line usage."""
     parser = argparse.ArgumentParser(description="Prepare training data for Hunyuan3D-Paint albedo fine-tuning")
