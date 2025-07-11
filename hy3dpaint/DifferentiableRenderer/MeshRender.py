@@ -1378,6 +1378,23 @@ class MeshRender:
         return texture_merge, trust_map_merge > 1e-8
 
     @torch.no_grad()
+    def fill_bake_texture_no_merge(self, textures, cos_maps):
+        """Fill texture by assigning texels only where unfilled so far."""
+        channel = textures[0].shape[-1]
+        texture_fill = torch.zeros(self.texture_size + (channel,)).to(self.device)
+        fill_map = torch.zeros(self.texture_size + (1,)).to(self.device)
+        for texture, cos_map in zip(textures, cos_maps):
+            # mask for pixels seen in this view but not yet filled
+            mask = (cos_map > 0) & (fill_map == 0)
+            # expand mask to cover all channels
+            mask3 = mask.repeat(1, 1, channel)
+            # assign texture values at unfilled locations
+            texture_fill[mask3] = texture[mask3]
+            # mark these locations as filled
+            fill_map[mask] = 1
+        return texture_fill, fill_map > 0
+
+    @torch.no_grad()
     def uv_inpaint(self, texture, mask, vertex_inpaint=True, method="NS", return_float=False):
         """
         Inpaint missing regions in UV texture using mesh-aware and traditional methods.

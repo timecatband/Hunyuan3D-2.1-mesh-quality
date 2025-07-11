@@ -35,6 +35,8 @@ class ViewProcessor:
             position_map = self.render.render_position(elev, azim, return_type="pl")
             position_maps.append(position_map)
 
+        
+
         return position_maps
 
     def bake_view_selection(
@@ -112,7 +114,11 @@ class ViewProcessor:
         project_textures, project_weighted_cos_maps = [], []
         project_boundary_maps = []
 
+        i = 0
+
         for view, camera_elev, camera_azim, weight in zip(views, camera_elevs, camera_azims, view_weights):
+            i += 1
+
             project_texture, project_cos_map, project_boundary_map = self.render.back_project(
                 view, camera_elev, camera_azim
             )
@@ -120,7 +126,8 @@ class ViewProcessor:
             project_textures.append(project_texture)
             project_weighted_cos_maps.append(project_cos_map)
             project_boundary_maps.append(project_boundary_map)
-            texture, ori_trust_map = self.render.fast_bake_texture(project_textures, project_weighted_cos_maps)
+            texture, ori_trust_map = self.render.fill_bake_texture_no_merge(project_textures, project_weighted_cos_maps)
+            #texture, ori_trust_map = self.render.fast_bake_texture(project_textures, project_weighted_cos_maps)
         return texture, ori_trust_map > 1e-8
 
     def texture_inpaint(self, texture, mask, defualt=None):

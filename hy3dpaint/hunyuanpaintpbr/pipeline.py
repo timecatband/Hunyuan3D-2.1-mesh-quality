@@ -315,16 +315,19 @@ class HunyuanPaintPipeline(StableDiffusionPipeline):
                 cached_condition["embeds_normal"] = cached_condition["embeds_normal"].repeat(
                     3, *([1] * (cached_condition["embeds_normal"].dim() - 1))
                 )
+                #cached_condition["embeds_normal"][0] *= 0.0
 
             if "embeds_position" in cached_condition:
                 cached_condition["embeds_position"] = cached_condition["embeds_position"].repeat(
                     3, *([1] * (cached_condition["embeds_position"].dim() - 1))
                 )
+                #cached_condition["embeds_position"][0] *= 0.0
 
             if "position_maps" in cached_condition:
                 cached_condition["position_maps"] = cached_condition["position_maps"].repeat(
                     3, *([1] * (cached_condition["position_maps"].dim() - 1))
                 )
+                #cached_condition["position_maps"][0] *= 0.0
 
         images = self.denoise(
             None,

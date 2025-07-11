@@ -58,14 +58,15 @@ class Hunyuan3DPaintConfig:
         self.candidate_camera_elevs = [0, 0, 0, 0, 90, -90]
         self.candidate_view_weights = [1, 0.1, 0.5, 0.1, 0.05, 0.05]
 
-        for azim in range(0, 360, 30):
-            self.candidate_camera_azims.append(azim)
-            self.candidate_camera_elevs.append(20)
-            self.candidate_view_weights.append(0.01)
+        # TODO(didiga): Remove this after testing
+        #for azim in range(0, 360, 30):
+        #    self.candidate_camera_azims.append(azim)
+        #    self.candidate_camera_elevs.append(20)
+        #    self.candidate_view_weights.append(0.01)
 
-            self.candidate_camera_azims.append(azim)
-            self.candidate_camera_elevs.append(-20)
-            self.candidate_view_weights.append(0.01)
+        #    self.candidate_camera_azims.append(azim)
+        #    self.candidate_camera_elevs.append(-20)
+        #    self.candidate_view_weights.append(0.01)
 
 
 class Hunyuan3DPaintPipeline:
@@ -134,8 +135,9 @@ class Hunyuan3DPaintPipeline:
         #position_map_pil = position_maps[0].cpu().numpy()
         #position_map_pil = (position_map_pil * 255).astype(np.uint8)
         #position_map_pil = Image.fromarray(position_map_pil)
-        position_maps[0].save("positionmap.png")
-        normal_maps[0].save("normalmap.png")
+        for i in range(len(normal_maps)):
+            position_maps[i].save(f"positionmap_{i}.png")
+            normal_maps[i].save(f"normalmap_{i}.png")
 
         ##########  Style  ###########
         image_caption = "high quality"
@@ -165,6 +167,9 @@ class Hunyuan3DPaintPipeline:
         for i in range(len(enhance_images["albedo"])):
             enhance_images["albedo"][i] = self.models["super_model"](enhance_images["albedo"][i])
             enhance_images["mr"][i] = self.models["super_model"](enhance_images["mr"][i])
+            enhance_images["albedo"][i].save(
+                os.path.join(path, f"enhanced_albedo_{i}.png")
+            )
 
         ###########  Bake  ##########
         for i in range(len(enhance_images)):

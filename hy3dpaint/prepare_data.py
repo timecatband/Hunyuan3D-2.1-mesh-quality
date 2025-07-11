@@ -316,11 +316,14 @@ class AlbedoDataPreparer:
             if self.pyrender_scene is not None and PYRENDER_AVAILABLE:
                 # Setup camera pose for pyrender
                 height_offset = 0.5 * (self.base_camera_distance * 0.2) * np.sin(np.radians(pose['azimuth'] * 2))
-                eye = [
-                    self.base_camera_distance * np.sin(np.radians(pose['azimuth'])), 
-                    height_offset + self.base_camera_distance * np.sin(np.radians(pose['elevation'])), 
-                    self.base_camera_distance * np.cos(np.radians(pose['azimuth']))
-                ]
+                # Proper spherical coords: account for elevation in x/z
+                rad_az = np.radians(pose['azimuth'])
+                rad_elev = np.radians(pose['elevation'])
+                dist = self.base_camera_distance
+                x = dist * np.cos(rad_elev) * np.sin(rad_az)
+                y = height_offset + dist * np.sin(rad_elev)
+                z = dist * np.cos(rad_elev) * np.cos(rad_az)
+                eye = [x, y, z]
                 camera_pose = self.create_look_at_pose(eye=eye, target=[0, 0, 0])
                 self.pyrender_scene.set_pose(self.camera_node, pose=camera_pose)
                 
