@@ -156,7 +156,7 @@ class TextureDataset(BaseDataset):
                     self.augment_image(self.load_image(image_gen.replace("_albedo", "_pos"), bg_gray)[0], bg_gray)
                 )
             else:
-                images_albedo.append(self.load_image(image_gen, bg_gray)[0])
+                images_albedo.append(self.load_image(image_gen, bg_gray, force_opaque=True)[0])
                 images_mr.append(self.load_image(image_gen.replace("_albedo", "_mr"), bg_gray)[0])
                 images_normal.append(self.load_image(image_gen.replace("_albedo", "_normal"), bg_gray)[0])
                 images_position.append(self.load_image(image_gen.replace("_albedo", "_pos"), bg_gray)[0])

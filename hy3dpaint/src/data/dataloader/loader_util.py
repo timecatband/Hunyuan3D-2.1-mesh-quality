@@ -39,7 +39,7 @@ class BaseDataset(Dataset):
     def __len__(self):
         return len(self.data)
 
-    def load_image(self, pil_img, color, image_size=None):
+    def load_image(self, pil_img, color, image_size=None, force_opaque=False):
         if image_size is None:
             image_size = self.image_size
         if isinstance(pil_img, str):
@@ -55,6 +55,8 @@ class BaseDataset(Dataset):
             alpha = np.ones_like(image)
         else:
             alpha = image[:, :, 3:]
+            if force_opaque:
+                alpha = np.ones_like(alpha)
             image = image[:, :, :3] * alpha + color * (1 - alpha)
         image = torch.from_numpy(image).permute(2, 0, 1).contiguous().float()
         alpha = torch.from_numpy(alpha).permute(2, 0, 1).contiguous().float()
