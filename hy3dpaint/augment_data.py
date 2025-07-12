@@ -111,7 +111,7 @@ class DataAugmenter:
             caption = self.caption_processor.decode(out[0], skip_special_tokens=True)
             
             # Enhance the caption for better diffusion results
-            enhanced_caption = f"{caption}, high quality, detailed, photorealistic, detailed texture"
+            enhanced_caption = f"{caption}, high quality, detailed texture, 4k, cinematic lighting"
             print(f"Generated caption: {enhanced_caption}")
             return enhanced_caption
         except Exception as e:
@@ -169,7 +169,7 @@ class DataAugmenter:
                 negative_prompt=self.negative_prompt,
                 image=original_image,
                 control_image=control_image,
-                controlnet_conditioning_scale=0.8,  # Reduce control strength
+                controlnet_conditioning_scale=1.0,  # Reduce control strength
                 strength=jitter_strength,
                 guidance_scale=guidance_scale,
                 num_inference_steps=num_inference_steps,

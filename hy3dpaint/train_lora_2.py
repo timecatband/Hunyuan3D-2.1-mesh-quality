@@ -123,12 +123,13 @@ def main():
     paint_pipeline = load_pretrained_pipeline(max_num_view=6,
                                               resolution=args.resolution)
     train_module   = convert_to_training_module(paint_pipeline)
-    setup_lora(train_module, args.lora_rank)
-    
+    if not args.resume_from:
+        setup_lora(train_module, args.lora_rank)
     # Resume from existing LoRA checkpoint if provided
     if args.resume_from:
         print(f"Resuming LoRA weights from {args.resume_from}")
-        train_module.unet = PeftModel.from_pretrained(train_module.unet, args.resume_from)
+        train_module.unet = PeftModel.from_pretrained(train_module.unet, args.resume_from, is_trainable=True)
+        train_module.unet.train()
 
     dataset        = load_dataset(args.json_path)
     dataloader     = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=1, pin_memory=False)
@@ -148,8 +149,8 @@ def main():
     # 1) Enable xFormers memory‐efficient attention & attention slicing
     #if hasattr(train_module.pipeline.unet, "enable_xformers_memory_efficient_attention"):
         #train_module.pipeline.unet.enable_xformers_memory_efficient_attention()
-    if hasattr(train_module.pipeline.unet, "enable_attention_slicing"):
-        train_module.pipeline.unet.enable_attention_slicing()
+    #if hasattr(train_module.pipeline.unet, "enable_attention_slicing"):
+    #    train_module.pipeline.unet.enable_attention_slicing()
     # 2) Cast major components to FP16
     #train_module.unet.half()
     #train_module.pipeline.vae.half()
@@ -195,6 +196,15 @@ def main():
     # Print number of trainable parameters
     trainable_params = sum(p.numel() for p in train_module.unet.parameters() if p.requires_grad)
     print(f"Number of trainable parameters: {trainable_params}")
+    # Get learned_text_clip
+    learned_clip = getattr(train_module.unet, "learned_text_clip", None)
+    print("Learned clip requires grad:", learned_clip.requires_grad if learned_clip else "N/A")
+    print("LEarned clip stats:", 
+          f"shape: {learned_clip.shape if learned_clip is not None else 'N/A'}, " 
+          f"requires_grad: {learned_clip.requires_grad if learned_clip is not None else 'N/A'}" 
+          f"mean: {learned_clip.mean().item() if learned_clip is not None else 'N/A'}, "
+          f"std: {learned_clip.std().item() if learned_clip is not None else 'N/A'}")
+    
 
     # Add AMP scaler
     scaler = torch.cuda.amp.GradScaler()

@@ -20,10 +20,16 @@ def mesh_uv_wrap(mesh):
     if isinstance(mesh, trimesh.Scene):
         mesh = mesh.dump(concatenate=True)
 
+    options = xatlas.PackOptions()
+    options.padding = 10
+
     if len(mesh.faces) > 500000000:
         raise ValueError("The mesh has more than 500,000,000 faces, which is not supported.")
 
-    vmapping, indices, uvs = xatlas.parametrize(mesh.vertices, mesh.faces)
+    atlas = xatlas.Atlas()
+    atlas.add_mesh(mesh.vertices, mesh.faces, normals=mesh.vertex_normals)
+    atlas.generate(pack_options=options)
+    vmapping, indices, uvs = atlas[0]
 
     mesh.vertices = mesh.vertices[vmapping]
     mesh.faces = indices

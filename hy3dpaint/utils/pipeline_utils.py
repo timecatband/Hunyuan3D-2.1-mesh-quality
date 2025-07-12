@@ -23,9 +23,11 @@ class ViewProcessor:
 
     def render_normal_multiview(self, camera_elevs, camera_azims, use_abs_coor=True):
         normal_maps = []
+        self.render.shader_type = "vertex"
         for elev, azim in zip(camera_elevs, camera_azims):
             normal_map = self.render.render_normal(elev, azim, use_abs_coor=use_abs_coor, return_type="pl")
             normal_maps.append(normal_map)
+        self.render.shader_type = "face"
 
         return normal_maps
 
@@ -34,8 +36,6 @@ class ViewProcessor:
         for elev, azim in zip(camera_elevs, camera_azims):
             position_map = self.render.render_position(elev, azim, return_type="pl")
             position_maps.append(position_map)
-
-        
 
         return position_maps
 
@@ -126,8 +126,8 @@ class ViewProcessor:
             project_textures.append(project_texture)
             project_weighted_cos_maps.append(project_cos_map)
             project_boundary_maps.append(project_boundary_map)
-            texture, ori_trust_map = self.render.fill_bake_texture_no_merge(project_textures, project_weighted_cos_maps)
-            #texture, ori_trust_map = self.render.fast_bake_texture(project_textures, project_weighted_cos_maps)
+            #texture, ori_trust_map = self.render.fill_bake_texture_no_merge(project_textures, project_weighted_cos_maps)
+            texture, ori_trust_map = self.render.fast_bake_texture(project_textures, project_weighted_cos_maps)
         return texture, ori_trust_map > 1e-8
 
     def texture_inpaint(self, texture, mask, defualt=None):
