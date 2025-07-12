@@ -131,7 +131,6 @@ class HunyuanPaint(pl.LightningModule):
             self.dino_v2 = self.dino_v2.bfloat16()
 
         self.validation_step_outputs = []
-        
 
     def register_schedule(self):
 
@@ -306,7 +305,7 @@ class HunyuanPaint(pl.LightningModule):
             - extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x.shape) * x
         )
 
-    def training_step(self, batch, batch_idx, supervise_mr=True):
+    def training_step(self, batch, batch_idx, supervise_mr=True, learnable_albedo_token=None):
         """Performs a single training step with both conditioning paths.
 
         Implements:
@@ -318,6 +317,8 @@ class HunyuanPaint(pl.LightningModule):
         Args:
             batch: Input batch from dataloader
             batch_idx: Index of current batch
+            supervise_mr: Whether to supervise metallic-roughness predictions
+            learnable_albedo_token: Learnable token to add to albedo embeddings
 
         Returns:
             torch.Tensor: Combined loss value
@@ -341,11 +342,13 @@ class HunyuanPaint(pl.LightningModule):
         ref_latents_another = self.encode_images(cond_imgs_another)  #! B, M, C, H, W
 
         all_shading_tokens = []
-        for token in self.pbr_settings:
+        for i, token in enumerate(self.pbr_settings):
             if token in ["albedo", "mr"]:
-                all_shading_tokens.append(
-                    getattr(self.unet, f"learned_text_clip_{token}").unsqueeze(dim=0).repeat(B, 1, 1)
-                )
+                base_token = getattr(self.unet, f"learned_text_clip_{token}").unsqueeze(dim=0).repeat(B, 1, 1)
+                # Add learnable parameter to albedo token if provided
+                if token == "albedo" and learnable_albedo_token is not None:
+                    base_token = base_token + learnable_albedo_token.repeat(B, 1, 1)
+                all_shading_tokens.append(base_token)
         shading_embeds = torch.stack(all_shading_tokens, dim=1)
 
         if self.unet.use_dino:
@@ -481,8 +484,13 @@ class HunyuanPaint(pl.LightningModule):
         # logging
         self.log_dict(loss_dict, prog_bar=True, logger=True, on_step=True, on_epoch=True)
         self.log("global_step", self.global_step, prog_bar=True, logger=True, on_step=True, on_epoch=False)
-        #lr = self.optimizers().param_groups[0]["lr"]
-        #self.log("lr_abs", lr, prog_bar=True, logger=True, on_step=True, on_epoch=False)
+        
+        # Log learnable parameter statistics if provided
+        if learnable_albedo_token is not None:
+            param_mean = learnable_albedo_token.mean().item()
+            param_std = learnable_albedo_token.std().item()
+            self.log("train/learnable_token_mean", param_mean, prog_bar=False, logger=True, on_step=True, on_epoch=False)
+            self.log("train/learnable_token_std", param_std, prog_bar=False, logger=True, on_step=True, on_epoch=False)
 
         return 0.85 * (albedo_loss + mr_loss) + 0.15 * consistency_loss
 

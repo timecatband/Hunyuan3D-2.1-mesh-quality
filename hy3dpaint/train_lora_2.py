@@ -173,13 +173,28 @@ def main():
         if "unet" not in name:
             param.requires_grad_(False)
 
-    # Setup optimizer
+    # Create learnable albedo token parameter
+    learnable_albedo_token = torch.nn.Parameter(torch.randn(1, 77, 1024, device=device) * 0.01)
+    
+    # Load learnable token if resuming from checkpoint
+    if args.resume_from:
+        token_path = os.path.join(args.resume_from, "learnable_albedo_token.pt")
+        if os.path.exists(token_path):
+            learnable_albedo_token.data = torch.load(token_path, map_location=device)
+            print(f"Loaded learnable albedo token from {token_path}")
+        else:
+            print("Warning: No learnable albedo token found in checkpoint, using random initialization")
+
+    # Setup optimizer - include both UNet parameters and learnable token
+    unet_params = list(train_module.unet.parameters())
+    all_params = unet_params + [learnable_albedo_token]
+    
     if args.use_prodigy:
         if not PRODIGY_AVAILABLE:
             raise ImportError("Prodigy optimizer is required but not available. Install with: pip install prodigyopt")
         print(f"Using Prodigy optimizer with D coefficient: {args.prodigy_d_coef}")
         optimizer = Prodigy(
-            train_module.unet.parameters(),
+            all_params,
             lr=1.0,
             d_coef=args.prodigy_d_coef,
             betas=(0.9, 0.99),
@@ -191,10 +206,11 @@ def main():
         )
     else:
         print(f"Using AdamW optimizer with learning rate: {args.lr}")
-        optimizer = torch.optim.AdamW(train_module.unet.parameters(), lr=args.lr)
+        optimizer = torch.optim.AdamW(all_params, lr=args.lr)
 
     # Print number of trainable parameters
     trainable_params = sum(p.numel() for p in train_module.unet.parameters() if p.requires_grad)
+    trainable_params += learnable_albedo_token.numel()
     print(f"Number of trainable parameters: {trainable_params}")
     # Get learned_text_clip
     learned_clip = getattr(train_module.unet, "learned_text_clip", None)
@@ -205,6 +221,9 @@ def main():
           f"mean: {learned_clip.mean().item() if learned_clip is not None else 'N/A'}, "
           f"std: {learned_clip.std().item() if learned_clip is not None else 'N/A'}")
     
+    # Print learnable albedo token stats
+    print(f"Learnable albedo token stats: shape: {learnable_albedo_token.shape}, "
+          f"mean: {learnable_albedo_token.mean().item():.6f}, std: {learnable_albedo_token.std().item():.6f}")
 
     # Add AMP scaler
     scaler = torch.cuda.amp.GradScaler()
@@ -220,7 +239,7 @@ def main():
         for step, batch in pbar:
             # Use autocast for mixed precision
             with torch.cuda.amp.autocast():
-                loss = train_module.training_step(batch, step, supervise_mr=False)
+                loss = train_module.training_step(batch, step, supervise_mr=False, learnable_albedo_token=learnable_albedo_token)
                 loss = loss / args.accum_steps
             
             # Scale loss and backward
@@ -238,6 +257,13 @@ def main():
                 scaler.update()
                 optimizer.zero_grad()
                 avg_step_loss = total_loss / ((step + 1) / args.accum_steps)
+                
+                # Print learnable parameter stats every 10 steps
+                if (step + 1) % 10 == 0:
+                    token_mean = learnable_albedo_token.mean().item()
+                    token_std = learnable_albedo_token.std().item()
+                    print(f"Step {step+1}: Learnable token mean={token_mean:.6f}, std={token_std:.6f}")
+                
                 pbar.set_postfix({"loss": f"{avg_step_loss:.4f}", "grad_norm": f"{grad_norm:.4f}"})
 
         epoch_avg = total_loss / len(dataloader)
@@ -249,7 +275,11 @@ def main():
         if (epoch + 1) % args.save_every == 0:
             ckpt_dir = os.path.join(args.output_dir, f"lora_epoch_{epoch+1}")
             train_module.unet.save_pretrained(ckpt_dir)
+            # Save learnable albedo token
+            token_path = os.path.join(ckpt_dir, "learnable_albedo_token.pt")
+            torch.save(learnable_albedo_token.data, token_path)
             print(f"Saved LoRA checkpoint to {ckpt_dir}")
+            print(f"Saved learnable albedo token to {token_path}")
 
 if __name__ == "__main__":
     main()
