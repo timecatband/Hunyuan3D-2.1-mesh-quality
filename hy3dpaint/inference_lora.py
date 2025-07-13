@@ -53,7 +53,8 @@ class LoraInferencePipeline:
         
         # Load LORA adapter
         self.load_lora_adapter()
-        
+        self.load_shading_token()
+
     def setup_base_pipeline(self):
         """Setup the base Hunyuan3D-Paint pipeline."""
         print("Setting up base pipeline...")
@@ -86,6 +87,16 @@ class LoraInferencePipeline:
         
         print("LORA adapter loaded successfully")
         
+    def load_shading_token(self):
+        """Load the learned albedo shading token if present."""
+        token_path = self.lora_checkpoint_path / "learnable_albedo_token.pt"
+        if token_path.exists():
+            self.learnable_shading_token = torch.load(token_path, map_location="cpu")
+            print(f"Loaded shading token from {token_path}")
+        else:
+            self.learnable_shading_token = None
+            print("No shading token found in checkpoint; proceeding without it")
+
     def get_training_config(self):
         """Load the training configuration if available."""
         config_file = self.lora_checkpoint_path / "training_config.json"
@@ -152,7 +163,8 @@ class LoraInferencePipeline:
             image_path=image_path,
             output_mesh_path=output_mesh_path,
             use_remesh=True,
-            save_glb=True
+            save_glb=True,
+            learnable_shading_token=self.learnable_shading_token
         )
         
         print(f"Textured mesh saved to: {result_path}")

@@ -184,6 +184,7 @@ class HunyuanPaintPipeline(StableDiffusionPipeline):
         num_inference_steps=15,
         return_dict=True,
         sync_condition=None,
+        extra_shading_token=None,
         **cached_condition,
     ):
 
@@ -268,9 +269,13 @@ class HunyuanPaintPipeline(StableDiffusionPipeline):
 
             all_shading_tokens = []
             for token in self.unet.pbr_setting:
-                all_shading_tokens.append(
-                    getattr(self.unet, f"learned_text_clip_{token}").unsqueeze(dim=0).repeat(batch_size, 1, 1)
-                )
+                base_token = getattr(self.unet, f"learned_text_clip_{token}").unsqueeze(dim=0).repeat(batch_size, 1, 1)
+                if token == "albedo" and extra_shading_token is not None:
+                    # Use the provided extra shading token for albedo
+                    print(f"Using extra shading token for {token}")
+                    base_token = base_token + extra_shading_token.repeat(batch_size, 1, 1)
+
+                all_shading_tokens.append(base_token)
             prompt_embeds = torch.stack(all_shading_tokens, dim=1)
             negative_prompt_embeds = torch.stack(all_shading_tokens, dim=1)
             # negative_prompt_embeds = torch.zeros_like(prompt_embeds)
@@ -685,10 +690,22 @@ class HunyuanPaintPipeline(StableDiffusionPipeline):
                         .view(-1)
                         .to(noise_pred_uncond)[:, None, None, None]
                     )
-                    noise_pred = noise_pred_uncond + self.guidance_scale * view_scale_tensor * (
-                        noise_pred_ref - noise_pred_uncond
+                    enable_scale_hack = True
+                    progress = i / len(timesteps)
+                    # t/ len
+                    #scale = 1.0-(progress*4)
+                    scale = 1.0
+                    if progress > 0.1:
+                        scale = 0.0
+                    if enable_scale_hack == False:
+                        scale = 1.0
+
+                    guidance_scale = self.guidance_scale*1.0
+                    #view_scale_tensor *= 0
+                    noise_pred = noise_pred_uncond + scale * guidance_scale * view_scale_tensor * (
+                        noise_pred_ref #- noise_pred_uncond
                     )
-                    noise_pred += self.guidance_scale * view_scale_tensor * (noise_pred_full - noise_pred_ref)
+                    noise_pred += 1.0*guidance_scale * view_scale_tensor * (noise_pred_full - noise_pred_ref)
 
                 if self.do_classifier_free_guidance and self.guidance_rescale > 0.0:
                     # Based on 3.4. in https://arxiv.org/pdf/2305.08891.pdf

@@ -64,13 +64,14 @@ class multiviewDiffusionNet:
         os.environ["PL_GLOBAL_SEED"] = str(seed)
 
     @torch.no_grad()
-    def __call__(self, images, conditions, prompt=None, custom_view_size=None, resize_input=False):
+    def __call__(self, images, conditions, prompt=None, custom_view_size=None, resize_input=False, extra_shading_token=None):
         pils = self.forward_one(
-            images, conditions, prompt=prompt, custom_view_size=custom_view_size, resize_input=resize_input
+            images, conditions, prompt=prompt, custom_view_size=custom_view_size, resize_input=resize_input,
+            extra_shading_token=extra_shading_token
         )
         return pils
 
-    def forward_one(self, input_images, control_images, prompt=None, custom_view_size=None, resize_input=False):
+    def forward_one(self, input_images, control_images, prompt=None, custom_view_size=None, resize_input=False, extra_shading_token=None):
         self.seed_everything(0)
         custom_view_size = custom_view_size if custom_view_size is not None else self.pipeline.view_size
         if not isinstance(input_images, List):
@@ -109,6 +110,10 @@ class multiviewDiffusionNet:
             "DDIMScheduler": 50,
             "ShiftSNRScheduler": 15,
         }
+        # Move extra shading token to device
+        extra_shading_token = extra_shading_token.to(self.pipeline.device) if extra_shading_token is not None else None
+        if extra_shading_token is not None:
+            extra_shading_token = extra_shading_token.half()
 
         mvd_image = self.pipeline(
             input_images[0:1],
@@ -116,6 +121,7 @@ class multiviewDiffusionNet:
             prompt=prompt,
             sync_condition=sync_condition,
             guidance_scale=3.0,
+            extra_shading_token=extra_shading_token,
             **kwargs,
         ).images
 
