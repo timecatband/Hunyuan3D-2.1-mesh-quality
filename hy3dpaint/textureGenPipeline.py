@@ -136,8 +136,8 @@ class Hunyuan3DPaintPipeline:
         #position_map_pil = (position_map_pil * 255).astype(np.uint8)
         #position_map_pil = Image.fromarray(position_map_pil)
         for i in range(len(normal_maps)):
-            position_maps[i].save(f"positionmap_{i}.png")
-            normal_maps[i].save(f"normalmap_{i}.png")
+            position_maps[i].save(os.path.join(path, f"positionmap_{i}.png"))
+            normal_maps[i].save(os.path.join(path, f"normalmap_{i}.png"))
 
         ##########  Style  ###########
         image_caption = "high quality"

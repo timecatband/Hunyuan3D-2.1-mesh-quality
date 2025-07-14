@@ -32,15 +32,15 @@ def mesh_simplify_trimesh(inputpath, outputpath, target_count=40000):
     # 调用减面函数
     courent = trimesh.load(outputpath.replace(".glb", ".obj"), force="mesh")
     # Repair the mesh if necessary
+    courent.merge_vertices()    
+    trimesh.repair.fix_normals(courent)
     if not courent.is_watertight:
         print("Mesh is not watertight, repairing...")
         courent.fill_holes()
     # Recalculate normals
-    courent.rezero()
-    trimesh.repair.fix_inversion(courent)
-    trimesh.repair.fix_normals(courent)
+    
     face_num = courent.faces.shape[0]
-    courent.merge_vertices()
+
 
     #if face_num > target_count:
     #    courent = courent.simplify_quadric_decimation(target_count)
