@@ -690,7 +690,7 @@ class HunyuanPaintPipeline(StableDiffusionPipeline):
                         .view(-1)
                         .to(noise_pred_uncond)[:, None, None, None]
                     )
-                    enable_scale_hack = True
+                    enable_scale_hack = False
                     progress = i / len(timesteps)
                     # t/ len
                     #scale = 1.0-(progress*4)
@@ -703,7 +703,7 @@ class HunyuanPaintPipeline(StableDiffusionPipeline):
                     guidance_scale = self.guidance_scale*1.0
                     #view_scale_tensor *= 0
                     noise_pred = noise_pred_uncond + scale * guidance_scale * view_scale_tensor * (
-                        noise_pred_ref #- noise_pred_uncond
+                        noise_pred_ref - noise_pred_uncond
                     )
                     noise_pred += 1.0*guidance_scale * view_scale_tensor * (noise_pred_full - noise_pred_ref)
 

@@ -97,6 +97,7 @@ class TextureDataset(BaseDataset):
         
         # Build reference image paths list
         images_ref_paths = [ref_image_path]
+        
         if alternative_light_paths:
             # Use a different lighting condition if available
             ref_image_diff_light_path = random.choice(alternative_light_paths)
