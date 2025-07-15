@@ -693,8 +693,8 @@ class HunyuanPaintPipeline(StableDiffusionPipeline):
                     enable_scale_hack = False
                     progress = i / len(timesteps)
                     # t/ len
-                    #scale = 1.0-(progress*4)
-                    scale = 1.0
+                    scale = 1.0-(progress)
+#                    scale = 1.0
                     if progress > 0.1:
                         scale = 0.0
                     if enable_scale_hack == False:
