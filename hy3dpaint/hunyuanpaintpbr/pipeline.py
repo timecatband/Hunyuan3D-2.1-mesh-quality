@@ -2,8 +2,7 @@
 # except for the third-party components listed below.
 # Hunyuan 3D does not impose any additional limitations beyond what is outlined
 # in the repsective licenses of these third-party components.
-# Users must comply with all terms and conditions of original licenses of these third-party
-# components and must ensure that the usage of the third party components adheres to
+# Users must comply with all terms and conditions of original licenses of these third-party components and must ensure that the usage of the third party components adheres to
 # all relevant laws and regulations.
 
 # For avoidance of doubts, Hunyuan 3D means the large language models and
@@ -117,6 +116,23 @@ class HunyuanPaintPipeline(StableDiffusionPipeline):
 
     def set_pbr_settings(self, pbr_settings: List[str]):
         self.pbr_settings = pbr_settings
+
+    def set_active_pbr_settings(self, active_settings: List[str]):
+        """Configure which PBR materials to use at runtime.
+        
+        Args:
+            active_settings: List of materials to use (e.g., ["albedo"] for albedo-only)
+        """
+        if isinstance(self.unet, UNet2p5DConditionModel):
+            self.unet.set_active_pbr_settings(active_settings)
+        else:
+            print("Warning: UNet is not UNet2p5DConditionModel, cannot set active PBR settings")
+
+    def get_active_pbr_count(self):
+        """Get number of currently active PBR materials."""
+        if isinstance(self.unet, UNet2p5DConditionModel):
+            return self.unet.get_active_pbr_count()
+        return len(getattr(self.unet, 'pbr_setting', ['albedo', 'mr']))
 
     def set_learned_parameters(self):
 
@@ -266,9 +282,11 @@ class HunyuanPaintPipeline(StableDiffusionPipeline):
             cached_condition["embeds_position"] = self.encode_images(cached_condition["images_position"])
 
         if self.unet.use_learned_text_clip:
-
+            # Get active PBR settings for dynamic material count
+            active_pbr_settings = getattr(self.unet, 'active_pbr_setting', self.unet.pbr_setting)
+            
             all_shading_tokens = []
-            for token in self.unet.pbr_setting:
+            for token in active_pbr_settings:
                 base_token = getattr(self.unet, f"learned_text_clip_{token}").unsqueeze(dim=0).repeat(batch_size, 1, 1)
                 if token == "albedo" and extra_shading_token is not None:
                     # Use the provided extra shading token for albedo
@@ -600,10 +618,10 @@ class HunyuanPaintPipeline(StableDiffusionPipeline):
         )
         assert num_images_per_prompt == 1
         # 5. Prepare latent variables
-        n_pbr = len(self.unet.pbr_setting)
+        n_pbr = self.get_active_pbr_count()  # Use dynamic count
         num_channels_latents = self.unet.config.in_channels
         latents = self.prepare_latents(
-            batch_size * kwargs["num_in_batch"] * n_pbr,  # num_images_per_prompt,
+            batch_size * kwargs["num_in_batch"] * n_pbr,
             num_channels_latents,
             height,
             width,
@@ -643,7 +661,6 @@ class HunyuanPaintPipeline(StableDiffusionPipeline):
                 latents = rearrange(
                     latents, "(b n_pbr n) c h w -> b n_pbr n c h w", n=kwargs["num_in_batch"], n_pbr=n_pbr
                 )
-                # latent_model_input = torch.cat([latents] * 3) if self.do_classifier_free_guidance else latents
                 latent_model_input = latents.repeat(3, 1, 1, 1, 1, 1) if self.do_classifier_free_guidance else latents
                 latent_model_input = rearrange(latent_model_input, "b n_pbr n c h w -> (b n_pbr n) c h w")
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)

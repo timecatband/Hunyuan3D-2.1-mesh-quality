@@ -90,9 +90,48 @@ class Hunyuan3DPaintPipeline:
         self.models["multiview_model"] = multiviewDiffusionNet(self.config)
         print("Models Loaded.")
 
+    def set_active_pbr_settings(self, active_settings: List[str]):
+        """Configure which PBR materials to use at runtime.
+        
+        Args:
+            active_settings: List of materials to use (e.g., ["albedo"] for albedo-only)
+        """
+        if "multiview_model" in self.models:
+            self.models["multiview_model"].set_active_pbr_settings(active_settings)
+            print(f"Pipeline configured for PBR settings: {active_settings}")
+        else:
+            print("Warning: Multiview model not loaded, cannot set PBR settings")
+
+    def get_active_pbr_settings(self):
+        """Get currently active PBR settings."""
+        if "multiview_model" in self.models:
+            return self.models["multiview_model"].get_active_pbr_settings()
+        return ["albedo", "mr"]  # Default
+
+    def get_memory_usage_estimate(self):
+        """Estimate VRAM usage for current PBR configuration."""
+        active_settings = self.get_active_pbr_settings()
+        base_usage = 8.0  # GB baseline
+        per_material_usage = 2.0  # GB per additional material
+        
+        estimated_usage = base_usage + (len(active_settings) - 1) * per_material_usage
+        return estimated_usage
+
     @torch.no_grad()
-    def __call__(self, mesh_path=None, image_path=None, output_mesh_path=None, use_remesh=True, save_glb=True, learnable_shading_token=None):
-        """Generate texture for 3D mesh using multiview diffusion"""
+    def __call__(self, mesh_path=None, image_path=None, output_mesh_path=None, use_remesh=True, save_glb=True, learnable_shading_token=None, pbr_settings=None):
+        """Generate texture for 3D mesh using multiview diffusion
+        
+        Args:
+            pbr_settings: List of PBR materials to generate (e.g., ["albedo"] for albedo-only)
+        """
+        # Configure PBR settings if provided
+        if pbr_settings is not None:
+            self.set_active_pbr_settings(pbr_settings)
+            
+        active_pbr_settings = self.get_active_pbr_settings()
+        print(f"Generating textures for: {active_pbr_settings}")
+        print(f"Estimated VRAM usage: {self.get_memory_usage_estimate():.1f} GB")
+
         # Ensure image_prompt is a list
         if isinstance(image_path, str):
             image_prompt = Image.open(image_path)
@@ -160,37 +199,46 @@ class Hunyuan3DPaintPipeline:
             resize_input=True,
             extra_shading_token=learnable_shading_token,
         )
+        
         ###########  Enhance  ##########
         enhance_images = {}
-        enhance_images["albedo"] = copy.deepcopy(multiviews_pbr["albedo"])
-        enhance_images["mr"] = copy.deepcopy(multiviews_pbr["mr"])
-
-        for i in range(len(enhance_images["albedo"])):
-            enhance_images["albedo"][i] = self.models["super_model"](enhance_images["albedo"][i])
-            enhance_images["mr"][i] = self.models["super_model"](enhance_images["mr"][i])
-            enhance_images["albedo"][i].save(
-                os.path.join(path, f"enhanced_albedo_{i}.png")
-            )
+        
+        # Only process active PBR materials
+        for material in active_pbr_settings:
+            if material in multiviews_pbr:
+                enhance_images[material] = copy.deepcopy(multiviews_pbr[material])
+                
+                for i in range(len(enhance_images[material])):
+                    enhance_images[material][i] = self.models["super_model"](enhance_images[material][i])
+                    enhance_images[material][i].save(
+                        os.path.join(path, f"enhanced_{material}_{i}.png")
+                    )
 
         ###########  Bake  ##########
-        for i in range(len(enhance_images)):
-            enhance_images["albedo"][i] = enhance_images["albedo"][i].resize(
-                (self.config.render_size, self.config.render_size)
+        # Resize enhanced images
+        for material in enhance_images:
+            for i in range(len(enhance_images[material])):
+                enhance_images[material][i] = enhance_images[material][i].resize(
+                    (self.config.render_size, self.config.render_size)
+                )
+        
+        # Always bake albedo texture
+        if "albedo" in enhance_images:
+            texture, mask = self.view_processor.bake_from_multiview(
+                enhance_images["albedo"], selected_camera_elevs, selected_camera_azims, selected_view_weights
             )
-            enhance_images["mr"][i] = enhance_images["mr"][i].resize((self.config.render_size, self.config.render_size))
-        texture, mask = self.view_processor.bake_from_multiview(
-            enhance_images["albedo"], selected_camera_elevs, selected_camera_azims, selected_view_weights
-        )
-        mask_np = (mask.squeeze(-1).cpu().numpy() * 255).astype(np.uint8)
-        texture_mr, mask_mr = self.view_processor.bake_from_multiview(
-            enhance_images["mr"], selected_camera_elevs, selected_camera_azims, selected_view_weights
-        )
-        mask_mr_np = (mask_mr.squeeze(-1).cpu().numpy() * 255).astype(np.uint8)
-
-        ##########  inpaint  ###########
-        texture = self.view_processor.texture_inpaint(texture, mask_np)
-        self.render.set_texture(texture, force_set=True)
+            mask_np = (mask.squeeze(-1).cpu().numpy() * 255).astype(np.uint8)
+            
+            ##########  inpaint  ###########
+            texture = self.view_processor.texture_inpaint(texture, mask_np)
+            self.render.set_texture(texture, force_set=True)
+        
+        # Conditionally bake metallic-roughness texture
         if "mr" in enhance_images:
+            texture_mr, mask_mr = self.view_processor.bake_from_multiview(
+                enhance_images["mr"], selected_camera_elevs, selected_camera_azims, selected_view_weights
+            )
+            mask_mr_np = (mask_mr.squeeze(-1).cpu().numpy() * 255).astype(np.uint8)
             texture_mr = self.view_processor.texture_inpaint(texture_mr, mask_mr_np)
             self.render.set_texture_mr(texture_mr)
 

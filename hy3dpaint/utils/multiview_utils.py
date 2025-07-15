@@ -57,6 +57,37 @@ class multiviewDiffusionNet:
             self.dino_v2 = Dino_v2(config.dino_ckpt_path).to(torch.float16)
             self.dino_v2 = self.dino_v2.to(self.device)
 
+    def set_active_pbr_settings(self, active_settings: List[str]):
+        """Configure which PBR materials to use at runtime.
+        
+        Args:
+            active_settings: List of materials to use (e.g., ["albedo"] for albedo-only)
+        """
+        if hasattr(self.pipeline, 'set_active_pbr_settings'):
+            self.pipeline.set_active_pbr_settings(active_settings)
+            print(f"Multiview model configured for PBR settings: {active_settings}")
+        else:
+            print("Warning: Pipeline does not support dynamic PBR settings")
+
+    def get_active_pbr_settings(self):
+        """Get currently active PBR settings."""
+        if hasattr(self.pipeline, 'get_active_pbr_count'):
+            # Try to get from UNet if available
+            if hasattr(self.pipeline.unet, 'active_pbr_setting'):
+                return self.pipeline.unet.active_pbr_setting
+            elif hasattr(self.pipeline.unet, 'pbr_setting'):
+                return self.pipeline.unet.pbr_setting
+        return ["albedo", "mr"]  # Default fallback
+
+    def get_memory_usage_estimate(self):
+        """Estimate VRAM usage for current PBR configuration."""
+        active_settings = self.get_active_pbr_settings()
+        base_usage = 6.0  # GB baseline for multiview model
+        per_material_usage = 1.5  # GB per additional material
+        
+        estimated_usage = base_usage + (len(active_settings) - 1) * per_material_usage
+        return estimated_usage
+
     def seed_everything(self, seed):
         random.seed(seed)
         np.random.seed(seed)
@@ -74,6 +105,11 @@ class multiviewDiffusionNet:
     def forward_one(self, input_images, control_images, prompt=None, custom_view_size=None, resize_input=False, extra_shading_token=None):
         self.seed_everything(0)
         custom_view_size = custom_view_size if custom_view_size is not None else self.pipeline.view_size
+        
+        # Get active PBR settings for output processing
+        active_pbr_settings = self.get_active_pbr_settings()
+        print(f"Multiview generation using PBR settings: {active_pbr_settings}")
+        
         if not isinstance(input_images, List):
             input_images = [input_images]
         if not resize_input:
@@ -126,8 +162,23 @@ class multiviewDiffusionNet:
         ).images
 
         if "pbr" in self.mode:
-            mvd_image = {"albedo": mvd_image[:num_view], "mr": mvd_image[num_view:]}
-            # mvd_image = {'albedo':mvd_image[:num_view]}
+            # Dynamically organize output based on active PBR settings
+            mvd_image_dict = {}
+            
+            # Calculate expected output count per material
+            expected_total = num_view * len(active_pbr_settings)
+            if len(mvd_image) != expected_total:
+                print(f"Warning: Expected {expected_total} images but got {len(mvd_image)}")
+                # Fallback to original behavior if mismatch
+                mvd_image_dict = {"albedo": mvd_image[:num_view], "mr": mvd_image[num_view:]}
+            else:
+                # Organize images by active materials
+                for i, material in enumerate(active_pbr_settings):
+                    start_idx = i * num_view
+                    end_idx = (i + 1) * num_view
+                    mvd_image_dict[material] = mvd_image[start_idx:end_idx]
+            
+            mvd_image = mvd_image_dict
         else:
             mvd_image = {"hdr": mvd_image}
 

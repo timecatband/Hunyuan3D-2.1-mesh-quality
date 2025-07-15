@@ -521,7 +521,10 @@ class Basic2p5DTransformerBlock(torch.nn.Module):
         condition_embed_dict = cross_attention_kwargs.pop("condition_embed_dict", None)
         dino_hidden_states = cross_attention_kwargs.pop("dino_hidden_states", None)
         position_voxel_indices = cross_attention_kwargs.pop("position_voxel_indices", None)
-        N_pbr = len(self.pbr_setting) if self.pbr_setting is not None else 1
+        active_pbr_setting = cross_attention_kwargs.pop("active_pbr_setting", self.pbr_setting)
+        
+        # Use active PBR count instead of full count
+        N_pbr = len(active_pbr_setting) if active_pbr_setting is not None else len(self.pbr_setting)
 
         if self.norm_type == "ada_norm":
             norm_hidden_states = self.norm1(hidden_states, timestep)
@@ -557,6 +560,7 @@ class Basic2p5DTransformerBlock(torch.nn.Module):
                 mda_norm_hidden_states,
                 encoder_hidden_states=encoder_hidden_states if self.only_cross_attention else None,
                 attention_mask=attention_mask,
+                active_pbr_setting=active_pbr_setting,  # Pass active settings to processor
                 **cross_attention_kwargs,
             )
             attn_output = rearrange(attn_output, "b n_pbr n l c -> (b n_pbr n) l c")
@@ -589,14 +593,15 @@ class Basic2p5DTransformerBlock(torch.nn.Module):
             #! Only using albedo features for reference attention
             ref_norm_hidden_states = rearrange(
                 norm_hidden_states, "(b n_pbr n) l c -> b n_pbr (n l) c", n=num_in_batch, n_pbr=N_pbr
-            )[:, 0, ...]
+            )[:, 0, ...]  # Always use first material (albedo) for reference
 
             attn_output = self.attn_refview(
                 ref_norm_hidden_states,
                 encoder_hidden_states=condition_embed,
                 attention_mask=None,
+                active_pbr_setting=active_pbr_setting,  # Pass active settings
                 **cross_attention_kwargs,
-            )  # b (n l) c
+            )
             attn_output = rearrange(attn_output, "b n_pbr (n l) c -> (b n_pbr n) l c", n=num_in_batch, n_pbr=N_pbr)
 
             ref_scale_timing = ref_scale
@@ -790,6 +795,7 @@ class UNet2p5DConditionModel(torch.nn.Module):
         self.use_learned_text_clip = True
         self.use_dual_stream = True
         self.pbr_setting = ["albedo", "mr"]
+        self.active_pbr_setting = ["albedo", "mr"]  # Runtime configurable
         self.pbr_token_channels = 77
 
         if self.use_dual_stream and self.use_ra:
@@ -918,6 +924,23 @@ class UNet2p5DConditionModel(torch.nn.Module):
         except AttributeError:
             return getattr(self.unet, name)
 
+    def set_active_pbr_settings(self, active_settings: List[str]):
+        """Set which PBR materials to use at runtime.
+        
+        Args:
+            active_settings: List of active materials (subset of self.pbr_setting)
+        """
+        valid_settings = [s for s in active_settings if s in self.pbr_setting]
+        if not valid_settings:
+            raise ValueError(f"No valid settings provided. Available: {self.pbr_setting}")
+        
+        self.active_pbr_setting = valid_settings
+        print(f"Active PBR settings: {self.active_pbr_setting}")
+
+    def get_active_pbr_count(self):
+        """Get number of currently active PBR materials."""
+        return len(self.active_pbr_setting)
+
     def forward(
         self,
         sample,
@@ -931,31 +954,14 @@ class UNet2p5DConditionModel(torch.nn.Module):
         mid_block_res_sample=None,
         **cached_condition,
     ):
-
-        """Forward pass with multiview/material conditioning.
+        B, N_pbr_full, N_gen, _, H, W = sample.shape
+        N_pbr_active = self.get_active_pbr_count()
         
-        Key stages:
-        1. Input preparation (concat normal/position maps)
-        2. Reference feature extraction (dual-stream)
-        3. Position encoding (voxel indices)
-        4. DINO feature projection
-        5. Main UNet processing with attention conditioning
+        # Only use active materials from the input
+        if N_pbr_active < N_pbr_full:
+            active_indices = [self.pbr_setting.index(setting) for setting in self.active_pbr_setting]
+            sample = sample[:, active_indices]
         
-        Args:
-            sample: Input latents [B, N_pbr, N_gen, C, H, W]
-            cached_condition: Dictionary containing:
-                - embeds_normal: Normal map embeddings
-                - embeds_position: Position map embeddings
-                - ref_latents: Reference image latents
-                - dino_hidden_states: DINO features
-                - position_maps: 3D position maps
-                - mva_scale: Multiview attention scale
-                - ref_scale: Reference attention scale
-                
-        Returns:
-            torch.Tensor: Output features
-        """
-
         B, N_pbr, N_gen, _, H, W = sample.shape
         assert H == W
 
@@ -971,7 +977,7 @@ class UNet2p5DConditionModel(torch.nn.Module):
 
         sample = rearrange(sample, "b n_pbr n c h w -> (b n_pbr n) c h w")
 
-        encoder_hidden_states_gen = encoder_hidden_states.unsqueeze(-3).repeat(1, 1, N_gen, 1, 1)
+        encoder_hidden_states_gen = encoder_hidden_states[:, :N_pbr_active].unsqueeze(-3).repeat(1, 1, N_gen, 1, 1)
         encoder_hidden_states_gen = rearrange(encoder_hidden_states_gen, "b n_pbr n l c -> (b n_pbr n) l c")
 
         if added_cond_kwargs is not None:
@@ -1098,5 +1104,6 @@ class UNet2p5DConditionModel(torch.nn.Module):
                 "mva_scale": mva_scale,
                 "ref_scale": ref_scale,
                 "position_voxel_indices": position_voxel_indices,
+                "active_pbr_setting": self.active_pbr_setting,  # Pass active settings
             },
         )

@@ -12,6 +12,7 @@ import torch
 import json
 from PIL import Image
 from pathlib import Path
+from typing import List
 
 # Local imports
 from textureGenPipeline import Hunyuan3DPaintPipeline, Hunyuan3DPaintConfig
@@ -136,7 +137,7 @@ class LoraInferencePipeline:
         
         print("=================================\n")
         
-    def generate_texture(self, mesh_path: str, image_path: str, output_mesh_path: str = None):
+    def generate_texture(self, mesh_path: str, image_path: str, output_mesh_path: str = None, pbr_settings: List[str] = None):
         """
         Generate texture for a mesh using the LORA-adapted model.
         
@@ -144,6 +145,7 @@ class LoraInferencePipeline:
             mesh_path: Path to input mesh
             image_path: Path to reference image
             output_mesh_path: Path for output mesh (optional)
+            pbr_settings: List of PBR materials to generate (e.g., ["albedo"] for albedo-only)
             
         Returns:
             Path to the generated textured mesh
@@ -151,11 +153,22 @@ class LoraInferencePipeline:
         print(f"Generating texture for mesh: {mesh_path}")
         print(f"Using reference image: {image_path}")
         
+        # Configure PBR settings (default to albedo-only for RAM saving)
+        if pbr_settings is None:
+            pbr_settings = ["albedo"]
+            
         # Load and display training config
         training_config = self.get_training_config()
         
         # Verify model state before generation
         self.verify_model_state()
+        
+        # Configure PBR settings
+        self.paint_pipeline.set_active_pbr_settings(pbr_settings)
+        
+        # Display memory estimate
+        estimated_vram = self.paint_pipeline.get_memory_usage_estimate()
+        print(f"Estimated VRAM usage: {estimated_vram:.1f} GB")
         
         # Generate texture using the pipeline
         result_path = self.paint_pipeline(
@@ -164,13 +177,14 @@ class LoraInferencePipeline:
             output_mesh_path=output_mesh_path,
             use_remesh=True,
             save_glb=True,
-            learnable_shading_token=self.learnable_shading_token
+            learnable_shading_token=self.learnable_shading_token,
+            pbr_settings=pbr_settings
         )
         
         print(f"Textured mesh saved to: {result_path}")
         return result_path
         
-    def batch_generate(self, mesh_list: list, image_list: list, output_dir: str):
+    def batch_generate(self, mesh_list: list, image_list: list, output_dir: str, pbr_settings: List[str] = None):
         """
         Generate textures for multiple meshes.
         
@@ -178,9 +192,14 @@ class LoraInferencePipeline:
             mesh_list: List of mesh file paths
             image_list: List of reference image paths
             output_dir: Output directory for generated meshes
+            pbr_settings: List of PBR materials to generate
         """
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Default to albedo-only for batch processing to save memory
+        if pbr_settings is None:
+            pbr_settings = ["albedo"]
         
         for i, (mesh_path, image_path) in enumerate(zip(mesh_list, image_list)):
             print(f"\nProcessing {i+1}/{len(mesh_list)}: {mesh_path}")
@@ -193,7 +212,8 @@ class LoraInferencePipeline:
                 result_path = self.generate_texture(
                     mesh_path=mesh_path,
                     image_path=image_path, 
-                    output_mesh_path=str(output_mesh_path)
+                    output_mesh_path=str(output_mesh_path),
+                    pbr_settings=pbr_settings
                 )
                 print(f"✓ Success: {result_path}")
             except Exception as e:
@@ -219,6 +239,9 @@ def main():
                        help="Maximum number of views (default: 6)")
     parser.add_argument("--resolution", type=int, default=512,
                        help="Output resolution (default: 512)")
+    parser.add_argument("--pbr_settings", nargs="+", default=["albedo"],
+                       choices=["albedo", "mr"],
+                       help="PBR materials to generate (default: albedo only)")
     
     args = parser.parse_args()
     
@@ -247,11 +270,13 @@ def main():
         result_path = pipeline.generate_texture(
             mesh_path=args.mesh_path,
             image_path=args.image_path,
-            output_mesh_path=args.output_mesh
+            output_mesh_path=args.output_mesh,
+            pbr_settings=args.pbr_settings
         )
         
         print(f"\n{'='*50}")
         print("Texture generation completed successfully!")
+        print(f"Generated materials: {args.pbr_settings}")
         print(f"Output: {result_path}")
         print(f"{'='*50}")
         

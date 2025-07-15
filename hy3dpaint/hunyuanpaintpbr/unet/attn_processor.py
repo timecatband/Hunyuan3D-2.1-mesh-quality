@@ -2,8 +2,7 @@
 # except for the third-party components listed below.
 # Hunyuan 3D does not impose any additional limitations beyond what is outlined
 # in the repsective licenses of these third-party components.
-# Users must comply with all terms and conditions of original licenses of these third-party
-# components and must ensure that the usage of the third party components adheres to
+# Users must comply with all terms and conditions of original licenses of these third-party components and must ensure that the usage of the third party components adheres to
 # all relevant laws and regulations.
 
 # For avoidance of doubts, Hunyuan 3D means the large language models and
@@ -718,8 +717,9 @@ class SelfAttnProcessor2_0(BaseAttnProcessor):
         encoder_hidden_states: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         temb: Optional[torch.Tensor] = None,
-        *args,
-        **kwargs,
+        scale: float = 1.0,
+        active_pbr_setting: Optional[List[str]] = None,
+        **cross_attention_kwargs,
     ) -> torch.Tensor:
         """
         Apply self-attention with PBR material processing.
@@ -733,8 +733,9 @@ class SelfAttnProcessor2_0(BaseAttnProcessor):
             encoder_hidden_states: Optional encoder hidden states for cross-attention
             attention_mask: Optional attention mask tensor
             temb: Optional temporal embedding tensor
-            *args: Additional positional arguments
-            **kwargs: Additional keyword arguments
+            scale: Scaling factor for attention
+            active_pbr_setting: Optional list of active PBR material types
+            **cross_attention_kwargs: Additional keyword arguments for cross-attention
 
         Returns:
             Combined attention output for all PBR material types
@@ -744,9 +745,12 @@ class SelfAttnProcessor2_0(BaseAttnProcessor):
         B = hidden_states.size(0)
         pbr_hidden_states = torch.split(hidden_states, 1, dim=1)
 
-        # Process each PBR setting
+        # Use active settings instead of all settings
+        active_settings = active_pbr_setting or self.pbr_setting
+
+        # Process each active PBR setting
         results = []
-        for token, pbr_hs in zip(self.pbr_setting, pbr_hidden_states):
+        for token, pbr_hs in zip(active_settings, pbr_hidden_states):
             processed_hs = rearrange(pbr_hs, "b n_pbrs n l c -> (b n_pbrs n) l c").to("cuda:0")
             result = self.process_single(attn, processed_hs, None, attention_mask, temb, token, False)
             results.append(result)
@@ -781,8 +785,9 @@ class RefAttnProcessor2_0(BaseAttnProcessor):
         encoder_hidden_states: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         temb: Optional[torch.Tensor] = None,
-        *args,
-        **kwargs,
+        scale: float = 1.0,
+        active_pbr_setting: Optional[List[str]] = None,
+        **cross_attention_kwargs,
     ) -> torch.Tensor:
         """
         Apply reference attention with shared Q/K and separate V projections.
@@ -797,8 +802,9 @@ class RefAttnProcessor2_0(BaseAttnProcessor):
             encoder_hidden_states: Optional encoder hidden states for cross-attention
             attention_mask: Optional attention mask tensor
             temb: Optional temporal embedding tensor
-            *args: Additional positional arguments
-            **kwargs: Additional keyword arguments
+            scale: Scaling factor for attention
+            active_pbr_setting: Optional list of active PBR material types
+            **cross_attention_kwargs: Additional keyword arguments for cross-attention
 
         Returns:
             Stacked attention output for all PBR material types
@@ -826,10 +832,13 @@ class RefAttnProcessor2_0(BaseAttnProcessor):
         hidden_states_list = torch.split(hidden_states, head_dim, dim=-1)
         output_hidden_states_list = []
 
+        # Use active settings instead of all settings
+        active_settings = self.pbr_settings  # active_pbr_setting or self.pbr_settings
+
         for i, hs in enumerate(hidden_states_list):
             hs = hs.transpose(1, 2).reshape(batch_size, -1, heads * head_dim).to(hs.dtype)
-            token_suffix = "_" + self.pbr_settings[i] if self.pbr_settings[i] != "albedo" else ""
-            target = attn if self.pbr_settings[i] == "albedo" else attn.processor
+            token_suffix = "_" + active_settings[i] if active_settings[i] != "albedo" else ""
+            target = attn if active_settings[i] == "albedo" else attn.processor
 
             hs = AttnUtils.finalize_output(
                 hs, input_ndim, shape_info, attn, residual, getattr(target, f"to_out{token_suffix}")
