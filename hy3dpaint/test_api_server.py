@@ -9,6 +9,7 @@ import json
 import time
 import sys
 from pathlib import Path
+import uuid
 
 def test_api_server(host="localhost", port=8083):
     """Test the API server with a simple request"""
@@ -85,7 +86,7 @@ def create_test_image():
     return img_bytes.getvalue()
 
 def test_generation(host="localhost", port=8083, mesh_path=None, image_path=None):
-    """Test the generation endpoint"""
+    """Test the generation endpoint (blocking)"""
     
     base_url = f"http://{host}:{port}"
     
@@ -115,39 +116,14 @@ def test_generation(host="localhost", port=8083, mesh_path=None, image_path=None
     
     print("Testing generation endpoint...")
     try:
-        # Use /send endpoint for background processing
-        response = requests.post(f"{base_url}/send", json=payload)
+        # Use blocking /generate endpoint
+        response = requests.post(f"{base_url}/generate", json=payload)
         if response.status_code == 200:
-            result = response.json()
-            uid = result.get('uid')
-            print(f"✓ Generation started, UID: {uid}")
-            
-            # Poll for completion
-            print("Polling for completion...")
-            max_attempts = 60  # 5 minutes
-            for attempt in range(max_attempts):
-                status_response = requests.get(f"{base_url}/status/{uid}")
-                if status_response.status_code == 200:
-                    status_data = status_response.json()
-                    if status_data.get('status') == 'completed':
-                        print("✓ Generation completed successfully")
-                        # Print textured mesh path if server returns it
-                        mesh_out = status_data.get('mesh_path') or status_data.get('output_path')
-                        if mesh_out:
-                            print(f"Textured mesh path: {mesh_out}")
-                        return True
-                    elif status_data.get('status') == 'processing':
-                        print(f"  Processing... (attempt {attempt + 1}/{max_attempts})")
-                        time.sleep(5)
-                    else:
-                        print(f"✗ Unexpected status: {status_data}")
-                        return False
-                else:
-                    print(f"✗ Status check failed: {status_response.status_code}")
-                    return False
-            
-            print("✗ Generation timed out")
-            return False
+            uid_hex = uuid.uuid4().hex
+            out_path = Path(f"{uid_hex}.glb")
+            out_path.write_bytes(response.content)
+            print(f"✓ Generation completed, saved to {out_path.resolve()}")
+            return True
         else:
             print(f"✗ Generation failed: {response.status_code}")
             print(f"Response: {response.text}")
@@ -181,3 +157,4 @@ if __name__ == "__main__":
             print("All tests passed!")
     else:
         print("Basic API tests passed! Use --test-generation to test the full pipeline")
+    

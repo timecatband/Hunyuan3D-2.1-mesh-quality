@@ -31,6 +31,7 @@ from PIL import Image
 from fastapi import FastAPI, Request, UploadFile, File, Form
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+import gc
 
 # Hunyuan3D-Paint imports
 from textureGenPipeline import Hunyuan3DPaintPipeline, Hunyuan3DPaintConfig
@@ -350,7 +351,7 @@ class HunyuanLoraWorker:
         # Display memory estimate
         estimated_vram = self.paint_pipeline.get_memory_usage_estimate()
         logger.info(f"Estimated VRAM usage: {estimated_vram:.1f} GB")
-        
+        self.paint_pipeline.set_active_pbr_settings(self.pbr_settings)
         # Generate texture using the Hunyuan3D-Paint pipeline
         result_path = self.paint_pipeline(
             mesh_path=processed_obj_path,
@@ -369,6 +370,9 @@ class HunyuanLoraWorker:
                 os.remove(processed_obj_path)
         except Exception as e:
             logger.warning(f"Cleanup failed: {e}")
+
+        gc.collect()
+        torch.cuda.empty_cache()
         
         return result_path
 
