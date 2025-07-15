@@ -237,6 +237,7 @@ class HunyuanLoraWorker:
         self.paint_pipeline.models["multiview_model"].pipeline.unet = lora_unet_main.merge_and_unload()
         
         logger.info("LORA adapter loaded successfully")
+        del self.paint_pipeline.models["multiview_model"].pipeline.text_encoder
         
     def load_shading_token(self):
         """Load the learned albedo shading token if present."""
