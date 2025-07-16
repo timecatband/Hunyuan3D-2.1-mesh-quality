@@ -9,6 +9,7 @@ from hy3dshape.rembg import BackgroundRemover
 from peft import LoraConfig, get_peft_model, PeftModel   # added PeftModel
 from hy3dshape.pipelines import Hunyuan3DDiTFlowMatchingPipeline
 from hy3dshape.schedulers import FlowMatchEulerDiscreteScheduler
+import hy3dshape.models.diffusion.transport
 
 class LatentDataset(Dataset):
     def __init__(self, folder):
@@ -101,6 +102,10 @@ def main():
 
     optimizer.zero_grad()
 
+    transport = hy3dshape.models.diffusion.transport.create_transport()
+    z_scale_factor = 1.0039506158752403
+
+
     # 4) training loop with grad‐accum & checkpointing
     for epoch in range(start_epoch, args.epochs):
         sum_loss = 0.0
@@ -108,6 +113,7 @@ def main():
 
         for step, (latents, images) in enumerate(dl):
             latents = latents.to(device=device, dtype=torch.float32)
+            latents = z_scale_factor * latents  # scale latents
 
             # prepare conditioning
             cond_inputs = pipe.prepare_image(images, None)
@@ -130,19 +136,11 @@ def main():
             elif u < p_drop_both + p_drop_image:
                 cond["main"] = tok
             else:
-                cond["main"] = torch.cat([cond["main"], tok], dim=1)
+                cond["main"] = cond["main"] + tok
 
-            # flow‐matching sample & mix
-            t = torch.rand(latents.size(0), device=device)
-            noise = torch.randn_like(latents)
-            sigma = t.view(-1, *([1] * (latents.ndim - 1)))
-            x_t = sigma * noise + (1.0 - sigma) * latents
-            timesteps = t * args.timesteps
-
-            # predict & loss
-            pred = dit_model(x_t.to(torch.float32), timesteps.to(torch.float32) / args.timesteps, cond)
-            target = latents - noise
-            loss = loss_fn(pred, target) / args.grad_accum_steps
+            loss = transport.training_losses(
+                dit_model, latents, dict(contexts=cond)
+            )["loss"]#.mean()
             loss.backward()
 
             sum_loss += loss.item()

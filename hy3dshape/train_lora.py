@@ -112,13 +112,14 @@ def main():
             # x_t = (1 - t) * noise + t * latents  # Standard flow matching interpolation
             # But looking at scheduler, it uses: x_t = sigma * noise + (1 - sigma) * latents
             sigma = t.view(-1, *([1] * (len(latents.shape) - 1)))  # Reshape for broadcasting
-            x_t = sigma * noise + (1.0 - sigma) * latents
+            x_t = (1.0-sigma) * noise + (sigma) * latents
+
             
             # Convert t to timesteps for model input (scheduler expects timesteps 0-1000)
             timesteps = t * args.timesteps
 
-            cond_tok = cond_tok.repeat(latents.size(0), 1, 1)  # Expand to match batch size
-            cond = {"main": cond_tok}
+            tok = cond_tok.repeat(latents.size(0), 1, 1)  # Expand to match batch size
+            cond = {"main": tok}
 
             pred = dit_model(x_t.to(torch.float32), timesteps.to(torch.float32)/args.timesteps, cond)
 
