@@ -35,6 +35,10 @@ def parse_args():
     parser.add_argument("--epochs",        type=int, default=10)
     parser.add_argument("--timesteps",     type=int, default=1000)
     parser.add_argument("--max_grad_norm", type=float, default=1.0, help="max norm for gradient clipping")
+    parser.add_argument("--grad_accum_steps", type=int, default=1,
+                        help="number of gradient accumulation steps")
+    parser.add_argument("--save_every_epochs", type=int, default=1,
+                        help="save adapters every N epochs")
     return parser.parse_args()
 
 def main():
@@ -75,9 +79,10 @@ def main():
     ds = LatentDataset(args.latents_dir)
     dl = DataLoader(ds, batch_size=args.batch_size, shuffle=True, collate_fn=collate_latents)
 
+    optimizer.zero_grad()
     # 7) training loop
     for epoch in range(args.epochs):
-        for latents in dl:
+        for step, latents in enumerate(dl):
             latents = latents.to(device=device, dtype=torch.float32)
             
             # Sample random timestep (sigma) from [0, 1] for flow matching
@@ -101,20 +106,30 @@ def main():
 
             # Flow matching target: the velocity field v_t = x_1 - x_0 = latents - noise
             target = latents - noise
-            loss = loss_fn(pred, target)
-            print("Loss " + str(loss.item()))
-            
-            optimizer.zero_grad()
+            loss = loss_fn(pred, target) / args.grad_accum_steps
             loss.backward()
-            # clip gradients and log norm
-            params = list(dit_model.parameters()) + [cond_tok]
-            total_norm = torch.nn.utils.clip_grad_norm_(params, args.max_grad_norm)
-            print(f"Grad norm before clipping: {total_norm:.4f} (clipped at {args.max_grad_norm})")
-            optimizer.step()
 
-        print(f"Epoch {epoch+1}/{args.epochs} — loss {loss.item():.4f}")
+            # step optimizer once every grad_accum_steps
+            if (step + 1) % args.grad_accum_steps == 0 or (step + 1 == len(dl)):
+                total_norm = torch.nn.utils.clip_grad_norm_(
+                    list(dit_model.parameters()) + [cond_tok],
+                    args.max_grad_norm
+                )
+                print(f"Grad norm: {total_norm:.4f}")
+                optimizer.step()
+                optimizer.zero_grad()
 
-    # 8) save adapters
+        print(f"Epoch {epoch+1}/{args.epochs} — last loss {loss.item():.4f}")
+
+        # checkpoint every N epochs
+        if (epoch + 1) % args.save_every_epochs == 0:
+            ckpt_dir = os.path.join(args.output_dir, f"epoch_{epoch+1}")
+            os.makedirs(ckpt_dir, exist_ok=True)
+            dit_model.save_pretrained(ckpt_dir)
+            torch.save(cond_tok, os.path.join(ckpt_dir, "cond_token.pt"))
+            print(f"Saved adapters at epoch {epoch+1} → {ckpt_dir}")
+
+    # 8) final save
     os.makedirs(args.output_dir, exist_ok=True)
     dit_model.save_pretrained(args.output_dir)
     # Save the learnable token
