@@ -93,7 +93,7 @@ for dir in "$INPUT_DIR"/*/; do
     # Execute the command. Using quotes around variables ensures that
     # paths with spaces or special characters are handled correctly.
     python3 inference_lora.py \
-        --lora_checkpoint lora_epoch_80 \
+        --lora_checkpoint lora_epoch_350 \
         --mesh_path "$glb_path" \
         --image_path "$png_path" \
         --output_mesh "$output_path"
