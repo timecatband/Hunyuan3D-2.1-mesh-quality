@@ -39,6 +39,8 @@ def parse_args():
                         help="number of gradient accumulation steps")
     parser.add_argument("--save_every_epochs", type=int, default=1,
                         help="save adapters every N epochs")
+    parser.add_argument("--resume_checkpoint", type=str, default=None,
+                        help="path to a saved checkpoint directory (e.g. .../epoch_5) to resume from")
     return parser.parse_args()
 
 def main():
@@ -55,18 +57,31 @@ def main():
     )
     base_dit = pipe.model
 
-    # 2) apply LoRA
-    lora_cfg = LoraConfig(
-        r=args.r,
-        lora_alpha=args.alpha,
-        target_modules="all-linear" #args.target_modules
-    )
-    dit_model = get_peft_model(base_dit, lora_cfg).to(device)
-    dit_model.train()
-    # keep full float32 for stability when training LoRA
-
-    # 3) single learnable conditional token
-    cond_tok = nn.Parameter(torch.randn(1, 1, args.cond_dim, device=device, dtype=dtype))
+    # 2) resume or new LoRA setup
+    if args.resume_checkpoint:
+        import re
+        from peft import PeftModel
+        # extract last completed epoch from folder name
+        m = re.search(r'epoch_(\d+)', os.path.basename(args.resume_checkpoint))
+        start_epoch = int(m.group(1)) if m else 0
+        # load saved LoRA adapters
+        dit_model = PeftModel.from_pretrained(base_dit, args.resume_checkpoint, is_trainable=True).to(device)
+        dit_model.train()
+        # load the learnable cond token
+        raw_tok = torch.load(os.path.join(args.resume_checkpoint, "cond_token.pt"), map_location=device)
+        cond_tok = nn.Parameter(raw_tok.to(device=device, dtype=dtype))
+    else:
+        start_epoch = 0
+        # 2) apply LoRA
+        lora_cfg = LoraConfig(
+            r=args.r,
+            lora_alpha=args.alpha,
+            target_modules="all-linear" #args.target_modules
+        )
+        dit_model = get_peft_model(base_dit, lora_cfg).to(device)
+        dit_model.train()
+        # 3) single learnable conditional token
+        cond_tok = nn.Parameter(torch.randn(1, 1, args.cond_dim, device=device, dtype=dtype))
 
     # 4) optimizer & loss
     optimizer = torch.optim.AdamW([*dit_model.parameters(), cond_tok], lr=args.lr)
@@ -81,7 +96,11 @@ def main():
 
     optimizer.zero_grad()
     # 7) training loop
-    for epoch in range(args.epochs):
+    for epoch in range(start_epoch, args.epochs):
+        # initialize tracking for this epoch
+        sum_loss = 0.0
+        num_steps = 0
+
         for step, latents in enumerate(dl):
             latents = latents.to(device=device, dtype=torch.float32)
             
@@ -98,7 +117,6 @@ def main():
             # Convert t to timesteps for model input (scheduler expects timesteps 0-1000)
             timesteps = t * args.timesteps
 
-            print("cond tok shape:", cond_tok.shape)
             cond_tok = cond_tok.repeat(latents.size(0), 1, 1)  # Expand to match batch size
             cond = {"main": cond_tok}
 
@@ -109,17 +127,26 @@ def main():
             loss = loss_fn(pred, target) / args.grad_accum_steps
             loss.backward()
 
+            # update running stats
+            sum_loss += loss.item()
+            num_steps += 1
+
             # step optimizer once every grad_accum_steps
             if (step + 1) % args.grad_accum_steps == 0 or (step + 1 == len(dl)):
                 total_norm = torch.nn.utils.clip_grad_norm_(
                     list(dit_model.parameters()) + [cond_tok],
                     args.max_grad_norm
                 )
-                print(f"Grad norm: {total_norm:.4f}")
                 optimizer.step()
                 optimizer.zero_grad()
 
-        print(f"Epoch {epoch+1}/{args.epochs} — last loss {loss.item():.4f}")
+                # print running average
+                avg_loss = sum_loss / num_steps
+                print(f"Step {step+1}/{len(dl)} — avg loss: {avg_loss:.4f}, grad norm: {total_norm:.4f}")
+
+        # epoch summary
+        avg_epoch_loss = sum_loss / num_steps if num_steps > 0 else 0.0
+        print(f"Epoch {epoch+1}/{args.epochs} — avg loss: {avg_epoch_loss:.4f}")
 
         # checkpoint every N epochs
         if (epoch + 1) % args.save_every_epochs == 0:
