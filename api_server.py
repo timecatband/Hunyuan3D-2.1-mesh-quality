@@ -167,7 +167,7 @@ class ModelWorker:
             args.lora_path,
             adapter_name="adapter1"
         )
-        self.pipeline.model = peft_model
+        self.pipeline.model = peft_model.merge_and_unload()
         self.pipeline.model.set_adapter("adapter1")
         self.pipeline.enable_flashvdm(mc_algo='mc')
         # self.pipeline_t2i = HunyuanDiTPipeline(

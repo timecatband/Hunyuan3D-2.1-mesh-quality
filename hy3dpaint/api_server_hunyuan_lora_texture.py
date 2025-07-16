@@ -282,14 +282,16 @@ class HunyuanLoraWorker:
 
             # Extract mesh data
             if 'obj_model' in params:
-                # Base64 encoded OBJ file
-                obj_data = base64.b64decode(params['obj_model'])
+                model_data = base64.b64decode(params['obj_model'])
                 object_uid = str(uid)
-                
-                # Save OBJ file
-                obj_path = os.path.join(SAVE_DIR, f"{object_uid}.obj")
+                # Determine GLB magic ("glTF") or default to OBJ
+                if model_data[:4] == b'glTF':
+                    filename = f"{object_uid}.glb"
+                else:
+                    filename = f"{object_uid}.obj"
+                obj_path = os.path.join(SAVE_DIR, filename)
                 with open(obj_path, 'wb') as f:
-                    f.write(obj_data)
+                    f.write(model_data)
             else:
                 raise ValueError("No mesh provided")
 
