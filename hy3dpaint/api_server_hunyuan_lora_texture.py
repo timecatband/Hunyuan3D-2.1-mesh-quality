@@ -88,13 +88,41 @@ except ImportError:
         from remesh_reduce_blender_script import reduce_mesh
         MESH_REDUCTION_AVAILABLE = True
     except ImportError:
-        print("Warning: Mesh reduction not available, skipping mesh optimization")
-        
-        def reduce_mesh(input_path, target_vertices=30000, output_path=None):
-            """Fallback - just copy the file"""
-            if output_path and input_path != output_path:
-                shutil.copy(input_path, output_path)
-            return output_path or input_path
+        print("Warning: Mesh reduction not available, using Blender decimation")
+        MESH_REDUCTION_AVAILABLE = False
+
+def reduce_mesh_blender(input_path, target_vertices=40000, output_path=None, blender_path="/usr/bin/blender"):
+    """Reduce mesh using Blender decimation script"""
+    if output_path is None:
+        name, ext = os.path.splitext(input_path)
+        output_path = f"{name}_reduced.glb"
+    
+    script_path = os.path.join(os.path.dirname(__file__), "blender_single_decimation.py")
+    
+    cmd = [
+        blender_path,
+        "--background",
+        "--python", script_path,
+        "--",
+        input_path,
+        output_path,
+        str(target_vertices)
+    ]
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode == 0:
+            logger.info(f"Blender decimation successful: {output_path}")
+            return output_path
+        else:
+            logger.error(f"Blender decimation failed: {result.stderr}")
+            return input_path
+    except subprocess.TimeoutExpired:
+        logger.error("Blender decimation timed out")
+        return input_path
+    except Exception as e:
+        logger.error(f"Blender decimation error: {e}")
+        return input_path
 
 # Apply torchvision fix if available
 try:
@@ -334,17 +362,13 @@ class HunyuanLoraWorker:
         os.makedirs(glb_output_dir, exist_ok=True)
         final_path = os.path.join(glb_output_dir, f'{object_uid}.glb')
         
-        # Optional mesh reduction for better performance
-        processed_obj_path = obj_path
-        if MESH_REDUCTION_AVAILABLE:
-            try:
-                reduced_obj_path = os.path.join(output_dir, f'{object_uid}_reduced.obj')
-                reduce_mesh(obj_path, target_vertices=30000, output_path=reduced_obj_path)
-                processed_obj_path = reduced_obj_path
-                logger.info("Mesh reduction completed")
-            except Exception as e:
-                logger.warning(f"Mesh reduction failed, using original mesh: {e}")
-        
+        # Use Blender decimation to reduce mesh
+        processed_obj_path = reduce_mesh_blender(
+            obj_path, target_vertices=40000,
+            output_path=os.path.join(output_dir, f'{object_uid}_reduced.glb'),
+            blender_path=self.blender_path
+        )
+
         # Save reference image temporarily
         ref_image_path = os.path.join(output_dir, 'reference.png')
         reference_image.save(ref_image_path)
@@ -487,6 +511,22 @@ if __name__ == "__main__":
                        help="PBR materials to generate (default: albedo only)")
     args = parser.parse_args()
     
+    logger.info(f"args: {args}")
+
+    model_semaphore = asyncio.Semaphore(args.limit_model_concurrency)
+
+    worker = HunyuanLoraWorker(
+        lora_checkpoint_path=args.lora_checkpoint,
+        blender_path=args.blender_path,
+        device=args.device,
+        seed=args.seed,
+        limit_model_concurrency=args.limit_model_concurrency,
+        max_num_view=args.max_num_view,
+        resolution=args.resolution,
+        pbr_settings=args.pbr_settings
+    )
+    
+    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
     logger.info(f"args: {args}")
 
     model_semaphore = asyncio.Semaphore(args.limit_model_concurrency)
