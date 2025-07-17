@@ -35,7 +35,7 @@ append_cond_tok = True
 #mesh = pipeline_shapegen(image=image, num_inference_steps=50, guidance_scale=15.0, extra_cond_token=cond_tok, classifier_scale=0.0, octree_resolution=512, mc_algo="poisson")[0]
 # TODO Add back the timestep hack unless I succeed in retraining lora...
 
-mesh = pipeline_shapegen(image=image, num_inference_steps=50, guidance_scale=10.0, extra_cond_tok=cond_tok, classifier_scale=0.0, octree_resolution=512, append_extra_cond_tok=append_cond_tok)[0]
+mesh = pipeline_shapegen(image=image, num_inference_steps=50, guidance_scale=10.0, extra_cond_tok=cond_tok, classifier_scale=0.0, octree_resolution=384, append_extra_cond_tok=append_cond_tok)[0]
 
 mesh.export('demo_4.glb')
 

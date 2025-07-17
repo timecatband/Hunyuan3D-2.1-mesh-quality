@@ -88,7 +88,7 @@ def main():
         cond_tok = nn.Parameter(raw_tok.to(device=device, dtype=dtype))
     else:
         start_epoch = 0
-        lora_cfg = LoraConfig(r=args.r, lora_alpha=args.alpha, target_modules=args.target_modules)
+        lora_cfg = LoraConfig(r=args.r, lora_alpha=args.alpha, target_modules="all-linear")
         dit_model = get_peft_model(base_dit, lora_cfg).to(device)
         dit_model.train()
         cond_tok = nn.Parameter(torch.randn(1, 1, args.cond_dim, device=device, dtype=dtype))

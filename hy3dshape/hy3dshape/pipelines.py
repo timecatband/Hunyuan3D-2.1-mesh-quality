@@ -809,7 +809,7 @@ class Hunyuan3DDiTFlowMatchingPipeline(Hunyuan3DDiTPipeline):
             print("Adding extra cond tokens:", extra_cond_tok.shape)
             zero_cond = torch.zeros(1, 1, cond["main"].shape[-1], dtype=cond["main"].dtype, device=cond["main"].device).half()
             extra_cond_tok = extra_cond_tok.half()
-            extra_cond_tok = torch.cat([zero_cond, extra_cond_tok], dim=0).to(device)
+            extra_cond_tok = torch.cat([extra_cond_tok, zero_cond], dim=0).to(device)
             cond["main"] = torch.cat([cond["main"], extra_cond_tok], dim=1)
         print("Cond shape:", {k: v.shape for k, v in cond.items()})
 
@@ -910,7 +910,7 @@ class Hunyuan3DDiTFlowMatchingPipeline(Hunyuan3DDiTPipeline):
                         adaptive_scale = torch.clamp(natural_strength / (target_strength + 1e-6), min_scale, max_scale)
 
                         
-                        effective_guidance = guidance_scale #adaptive_scale * guidance_scale
+                        effective_guidance = adaptive_scale * guidance_scale
                         print(f"Adaptive scale: {adaptive_scale:.3f}, Effective guidance: {effective_guidance:.3f}")
                         diff = noise_pred_cond - noise_pred_uncond
                         noise_pred = noise_pred_uncond + effective_guidance * (diff)
