@@ -56,17 +56,17 @@ class Hunyuan3DPaintConfig:
         # view selection
         self.candidate_camera_azims = [0, 90, 180, 270, 0, 180]
         self.candidate_camera_elevs = [0, 0, 0, 0, 90, -90]
-        self.candidate_view_weights = [1, 0.1, 0.5, 0.1, 0.05, 0.05]
+        self.candidate_view_weights = [1, 0.1, 0.5, 0.1, 0.001, 0.001]
 
         # TODO(didiga): Remove this after testing
         for azim in range(0, 360, 30):
             self.candidate_camera_azims.append(azim)
             self.candidate_camera_elevs.append(20)
-            self.candidate_view_weights.append(0.01)
+            self.candidate_view_weights.append(0.4)
 
-            self.candidate_camera_azims.append(azim)
+            self.candidate_camera_azims.append(-azim)
             self.candidate_camera_elevs.append(-20)
-            self.candidate_view_weights.append(0.01)
+            self.candidate_view_weights.append(0.4)
 
 
 class Hunyuan3DPaintPipeline:
@@ -205,6 +205,8 @@ class Hunyuan3DPaintPipeline:
         
         # Only process active PBR materials
         for material in active_pbr_settings:
+            if material != "albedo":
+                continue
             if material in multiviews_pbr:
                 enhance_images[material] = copy.deepcopy(multiviews_pbr[material])
                 
@@ -217,6 +219,8 @@ class Hunyuan3DPaintPipeline:
         ###########  Bake  ##########
         # Resize enhanced images
         for material in enhance_images:
+            if material != "albedo":
+                continue
             for i in range(len(enhance_images[material])):
                 enhance_images[material][i] = enhance_images[material][i].resize(
                     (self.config.render_size, self.config.render_size)
@@ -234,13 +238,13 @@ class Hunyuan3DPaintPipeline:
             self.render.set_texture(texture, force_set=True)
         
         # Conditionally bake metallic-roughness texture
-        if "mr" in enhance_images:
-            texture_mr, mask_mr = self.view_processor.bake_from_multiview(
-                enhance_images["mr"], selected_camera_elevs, selected_camera_azims, selected_view_weights
-            )
-            mask_mr_np = (mask_mr.squeeze(-1).cpu().numpy() * 255).astype(np.uint8)
-            texture_mr = self.view_processor.texture_inpaint(texture_mr, mask_mr_np)
-            self.render.set_texture_mr(texture_mr)
+        #if "mr" in enhance_images:
+        #    texture_mr, mask_mr = self.view_processor.bake_from_multiview(
+        #        enhance_images["mr"], selected_camera_elevs, selected_camera_azims, selected_view_weights
+        #    )
+        #    mask_mr_np = (mask_mr.squeeze(-1).cpu().numpy() * 255).astype(np.uint8)
+        #    texture_mr = self.view_processor.texture_inpaint(texture_mr, mask_mr_np)
+        #    self.render.set_texture_mr(texture_mr)
 
         self.render.save_mesh(output_mesh_path, downsample=True)
 

@@ -218,7 +218,7 @@ class ModelWorker:
             params['octree_resolution'] = 256#params.get("octree_resolution", 256)
             params['num_inference_steps'] = 50#params.get("num_inference_steps", 50)
             params['guidance_scale'] = 10#params.get('guidance_scale', 15.0)
-            params['mc_algo'] = 'mc'
+#            params['mc_algo'] = 'mc'
             params['extra_cond_tok'] = self.cond_tok
             params['append_extra_cond_tok'] = True
             import time
