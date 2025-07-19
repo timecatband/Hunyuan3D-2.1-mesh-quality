@@ -810,7 +810,7 @@ class Hunyuan3DDiTFlowMatchingPipeline(Hunyuan3DDiTPipeline):
             zero_cond = torch.zeros(1, 1, cond["main"].shape[-1], dtype=cond["main"].dtype, device=cond["main"].device).half()
             extra_cond_tok = extra_cond_tok.half()
             extra_cond_tok = torch.cat([extra_cond_tok, zero_cond], dim=0).to(device)
-            cond["main"] = torch.cat([cond["main"], extra_cond_tok], dim=1)
+            cond["main"] = cond["main"] + extra_cond_tok
         print("Cond shape:", {k: v.shape for k, v in cond.items()})
 
         batch_size = image.shape[0]
