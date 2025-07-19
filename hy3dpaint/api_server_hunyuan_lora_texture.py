@@ -310,7 +310,7 @@ class HunyuanLoraWorker:
 
             # Extract mesh data
             if 'mesh' in params:
-                model_data = base64.b64decode(params['obj_model'])
+                model_data = base64.b64decode(params['mesh'])
                 object_uid = str(uid)
                 # Determine GLB magic ("glTF") or default to OBJ
                 if model_data[:4] == b'glTF':
