@@ -95,7 +95,7 @@ class ViewProcessor:
                     max_inc = new_inc_area
                     max_idx = idx
 
-            if max_inc > 0.01:
+            if max_inc > 0.001:
                 is_selected[max_idx] = True
                 selected_camera_elevs.append(candidate_camera_elevs[max_idx])
                 selected_camera_azims.append(candidate_camera_azims[max_idx])
