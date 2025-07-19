@@ -127,7 +127,7 @@ class ViewProcessor:
             project_weighted_cos_maps.append(project_cos_map)
             project_boundary_maps.append(project_boundary_map)
             #texture, ori_trust_map = self.render.fill_bake_texture_no_merge(project_textures, project_weighted_cos_maps)
-            texture, ori_trust_map = self.render.fast_bake_texture(project_textures, project_weighted_cos_maps)
+            texture, ori_trust_map = self.render.fast_bake_texture_winner_takes_all(project_textures, project_weighted_cos_maps)
         return texture, ori_trust_map > 1e-8
 
     def texture_inpaint(self, texture, mask, defualt=None):

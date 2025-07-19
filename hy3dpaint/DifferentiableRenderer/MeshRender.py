@@ -1378,6 +1378,35 @@ class MeshRender:
         return texture_merge, trust_map_merge > 1e-8
 
     @torch.no_grad()
+    def fast_bake_texture_winner_takes_all(self, textures, cos_maps):
+        """
+        Merge multiple textures using winner-takes-all strategy based on weight maps.
+        Each texel is assigned the value from the view with the highest weight.
+        
+        Args:
+            textures: List of texture tensors to merge
+            cos_maps: List of corresponding cosine weight maps
+            
+        Returns:
+            Tuple of (merged_texture, valid_mask) tensors
+        """
+        channel = textures[0].shape[-1]
+        texture_merge = torch.zeros(self.texture_size + (channel,)).to(self.device)
+        max_weight_map = torch.zeros(self.texture_size + (1,)).to(self.device)
+        
+        for texture, cos_map in zip(textures, cos_maps):
+            # Find pixels where current view has higher weight than previously seen
+            higher_weight_mask = cos_map > max_weight_map
+            
+            # Update texture values where current view wins
+            texture_merge[higher_weight_mask.repeat(1, 1, channel)] = texture[higher_weight_mask.repeat(1, 1, channel)]
+            
+            # Update maximum weight map
+            max_weight_map = torch.maximum(max_weight_map, cos_map)
+        
+        return texture_merge, max_weight_map > 1e-8
+
+    @torch.no_grad()
     def fill_bake_texture_no_merge(self, textures, cos_maps):
         """Fill texture by assigning texels only where unfilled so far."""
         channel = textures[0].shape[-1]
