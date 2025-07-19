@@ -59,14 +59,14 @@ class Hunyuan3DPaintConfig:
         self.candidate_view_weights = [1, 0.1, 0.5, 0.1, 0.05, 0.05]
 
         # TODO(didiga): Remove this after testing
-        #for azim in range(0, 360, 30):
-        #    self.candidate_camera_azims.append(azim)
-        #    self.candidate_camera_elevs.append(20)
-        #    self.candidate_view_weights.append(0.01)
+        for azim in range(0, 360, 30):
+            self.candidate_camera_azims.append(azim)
+            self.candidate_camera_elevs.append(20)
+            self.candidate_view_weights.append(0.01)
 
-        #    self.candidate_camera_azims.append(azim)
-        #    self.candidate_camera_elevs.append(-20)
-        #    self.candidate_view_weights.append(0.01)
+            self.candidate_camera_azims.append(azim)
+            self.candidate_camera_elevs.append(-20)
+            self.candidate_view_weights.append(0.01)
 
 
 class Hunyuan3DPaintPipeline:
