@@ -215,7 +215,7 @@ class ModelWorker:
         else:
             seed = params.get("seed", 1234)
             params['generator'] = torch.Generator(self.device).manual_seed(seed)
-            params['octree_resolution'] = 256#params.get("octree_resolution", 256)
+            params['octree_resolution'] = 384#params.get("octree_resolution", 256)
             params['num_inference_steps'] = 50#params.get("num_inference_steps", 50)
             params['guidance_scale'] = 10#params.get('guidance_scale', 15.0)
 #            params['mc_algo'] = 'mc'
