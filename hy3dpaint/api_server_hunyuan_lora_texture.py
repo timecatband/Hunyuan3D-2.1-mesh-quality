@@ -309,7 +309,7 @@ class HunyuanLoraWorker:
                 raise ValueError("No reference image provided")
 
             # Extract mesh data
-            if 'obj_model' in params:
+            if 'mesh' in params:
                 model_data = base64.b64decode(params['obj_model'])
                 object_uid = str(uid)
                 # Determine GLB magic ("glTF") or default to OBJ
