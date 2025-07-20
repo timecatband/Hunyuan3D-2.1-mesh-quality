@@ -258,7 +258,8 @@ class HunyuanLoraWorker:
         inner_unet_main = self.paint_pipeline.models["multiview_model"].pipeline.unet
         
         # Load the LoRA weights into the inner UNet using PeftModel
-        lora_unet_main = PeftModel.from_pretrained(inner_unet_main, self.lora_checkpoint_path)
+        lora_unet_main = PeftModel.from_pretrained(inner_unet_main, self.lora_checkpoint_path, adapter_name="default")
+        lora_unet_main.set_adapters("default", 1.0)
         
         # Merge the LoRA weights into the base model
         logger.info("Merging LoRA adapter into main generator UNet...")

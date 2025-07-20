@@ -47,6 +47,54 @@ from diffusers.pipelines.stable_diffusion.pipeline_output import StableDiffusion
 from .unet.modules import UNet2p5DConditionModel
 from .unet.attn_processor import SelfAttnProcessor2_0, RefAttnProcessor2_0, PoseRoPEAttnProcessor2_0
 
+import torch.nn.functional as F
+
+def projected_guidance(
+    noise_pred_uncond: torch.Tensor,
+    noise_pred_ref: torch.Tensor,
+    guidance_scale: float,
+    eps: float = 1e-6
+) -> torch.Tensor:
+    """
+    Combines two noise predictions using projected guidance.
+
+    Args:
+        noise_pred_uncond: Noise prediction from geometry only.
+        noise_pred_ref: Noise prediction from geometry and a reference image.
+        guidance_scale: The scale for amplifying the compatible guidance.
+        eps: A small value for numerical stability.
+
+    Returns:
+        The final combined noise prediction.
+    """
+    # Ensure tensors are flattened for dot product calculation
+    b, *c = noise_pred_uncond.shape
+    g = noise_pred_uncond.view(b, -1)
+    r = noise_pred_ref.view(b, -1)
+
+    # 1. Calculate the standard guidance vector
+    guidance_vec = r - g
+
+    # 2. Project the guidance vector onto the unconditional prediction
+    # Calculate the dot product, clamping at 0 to prevent opposing guidance
+    dot_product = torch.sum(guidance_vec * g, dim=-1)
+    dot_product = F.relu(dot_product) # Equivalent to max(0, dot_product)
+
+    # Get the squared magnitude of the unconditional prediction
+    g_magnitude_sq = torch.sum(g * g, dim=-1)
+
+    # Calculate the projected guidance vector
+    # Reshape scalar values to match tensor dimensions for broadcasting
+    projected_guidance_vec = (
+        dot_product / (g_magnitude_sq + eps)
+    ).unsqueeze(-1) * g
+
+    # 3. Combine the unconditional prediction with the scaled, projected guidance
+    noise_pred_final = g + guidance_scale * projected_guidance_vec
+
+    # 4. Reshape back to the original tensor shape
+    return noise_pred_final.view(b, *c)
+
 __all__ = [
     "HunyuanPaintPipeline",
     "UNet2p5DConditionModel",
@@ -708,7 +756,7 @@ class HunyuanPaintPipeline(StableDiffusionPipeline):
                         .to(noise_pred_uncond)[:, None, None, None]
                     )
                     enable_scale_hack = False
-                    progress = i / len(timesteps)
+                    progress = i / num_inference_steps
                     # t/ len
                     scale = 1.0-(progress)
 #                    scale = 1.0
@@ -723,6 +771,8 @@ class HunyuanPaintPipeline(StableDiffusionPipeline):
                         noise_pred_ref - noise_pred_uncond
                     )
                     noise_pred += 1.0*guidance_scale * view_scale_tensor * (noise_pred_full - noise_pred_ref)
+                    if progress > 0.2:
+                        noise_pred = projected_guidance(noise_pred_uncond, noise_pred_full, 10.0) + 0.1*noise_pred
 
                 if self.do_classifier_free_guidance and self.guidance_rescale > 0.0:
                     # Based on 3.4. in https://arxiv.org/pdf/2305.08891.pdf
