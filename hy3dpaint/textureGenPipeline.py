@@ -27,6 +27,7 @@ from utils.image_super_utils import imageSuperNet
 from utils.uvwrap_utils import mesh_uv_wrap
 from DifferentiableRenderer.mesh_utils import convert_obj_to_glb
 import warnings
+import gc
 
 warnings.filterwarnings("ignore")
 from diffusers.utils import logging as diffusers_logging
@@ -75,15 +76,17 @@ class Hunyuan3DPaintPipeline:
         self.config = config if config is not None else Hunyuan3DPaintConfig()
         self.models = {}
         self.stats_logs = {}
+        self.create_mesh_render()
+        self.view_processor = ViewProcessor(self.config, self.render)
+        self.load_models()
+
+    def create_mesh_render(self):
         self.render = MeshRender(
             default_resolution=self.config.render_size,
             texture_size=self.config.texture_size,
             bake_mode=self.config.bake_mode,
             raster_mode=self.config.raster_mode,
         )
-        self.view_processor = ViewProcessor(self.config, self.render)
-        self.load_models()
-
     def load_models(self):
         torch.cuda.empty_cache()
         self.models["super_model"] = imageSuperNet(self.config)
@@ -127,6 +130,9 @@ class Hunyuan3DPaintPipeline:
         # Configure PBR settings if provided
         if pbr_settings is not None:
             self.set_active_pbr_settings(pbr_settings)
+
+        if self.render is None:
+            self.create_mesh_render()
             
         active_pbr_settings = self.get_active_pbr_settings()
         print(f"Generating textures for: {active_pbr_settings}")
@@ -247,9 +253,14 @@ class Hunyuan3DPaintPipeline:
         #    self.render.set_texture_mr(texture_mr)
 
         self.render.save_mesh(output_mesh_path, downsample=True)
+        del texture
 
         if save_glb:
             convert_obj_to_glb(output_mesh_path, output_mesh_path.replace(".obj", ".glb"))
             output_glb_path = output_mesh_path.replace(".obj", ".glb")
+        del self.render
+        self.render = None
+        gc.collect()
+        torch.cuda.empty_cache()
 
         return output_mesh_path
