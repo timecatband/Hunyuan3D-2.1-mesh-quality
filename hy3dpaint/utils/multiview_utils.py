@@ -46,7 +46,7 @@ class multiviewDiffusionNet:
             torch_dtype=torch.float16
         )
 
-        pipeline.scheduler = UniPCMultistepScheduler.from_config(pipeline.scheduler.config, timestep_spacing="trailing")
+        pipeline.scheduler = EulerAncestralDiscreteScheduler.from_config(pipeline.scheduler.config, timestep_spacing="trailing")
         pipeline.set_progress_bar_config(disable=True)
         pipeline.eval()
         setattr(pipeline, "view_size", cfg.model.params.get("view_size", 320))
