@@ -16,6 +16,7 @@ from typing import List
 
 # Local imports
 from textureGenPipeline import Hunyuan3DPaintPipeline, Hunyuan3DPaintConfig
+from torch.profiler import profile
 
 try:
     from peft import PeftModel
@@ -259,9 +260,9 @@ def main():
         return 1
     
     try:
-        torch.cuda.memory._record_memory_history(
-            max_entries=350000,
-        )
+        #torch.cuda.memory._record_memory_history(
+            #max_entries=350000,
+        #)
         # Create inference pipeline
         pipeline = LoraInferencePipeline(
             lora_checkpoint_path=args.lora_checkpoint,
@@ -269,16 +270,15 @@ def main():
             resolution=args.resolution
         )
 
-        for i in range(0,3):    
             # Generate texture
-            print(torch.cuda.memory_allocated() / 1024**2, "MB allocated")
-            result_path = pipeline.generate_texture(
-                mesh_path=args.mesh_path,
-                image_path=args.image_path,
-                output_mesh_path=args.output_mesh,
-                pbr_settings=args.pbr_settings
-            )
-        torch.cuda.memory._dump_snapshot("memory.pickle")
+
+        result_path = pipeline.generate_texture(
+            mesh_path=args.mesh_path,
+            image_path=args.image_path,
+            output_mesh_path=args.output_mesh,
+            pbr_settings=args.pbr_settings
+        )
+        #torch.cuda.memory._dump_snapshot("memory.pickle")
         
         print(f"\n{'='*50}")
         print("Texture generation completed successfully!")
@@ -289,7 +289,7 @@ def main():
         return 0
         
     except Exception as e:
-        torch.cuda.memory._dump_snapshot("memory.pickle")        
+        #torch.cuda.memory._dump_snapshot("memory.pickle")        
         print(f"Error: Texture generation failed: {e}")
         import traceback
         traceback.print_exc()
