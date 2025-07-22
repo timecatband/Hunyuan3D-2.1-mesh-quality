@@ -417,7 +417,7 @@ app.add_middleware(
 )
 
 
-@app.post("/generate")
+@app.post("/generate_texture")
 async def generate(request: Request):
     """Generate textured GLB from input mesh and reference image"""
     logger.info("Worker generating...")
