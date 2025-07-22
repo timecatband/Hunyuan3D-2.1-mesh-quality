@@ -349,6 +349,7 @@ class HunyuanLoraWorker:
         except Exception as e:
             logger.error(f"Generation failed: {e}")
             traceback.print_exc()
+            sys.exit(1)
             raise
 
     def run_hunyuan_pipeline(self, obj_path, reference_image, object_uid, geo_rotation=0):
