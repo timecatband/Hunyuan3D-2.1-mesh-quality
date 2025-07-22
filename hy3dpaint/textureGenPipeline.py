@@ -258,8 +258,6 @@ class Hunyuan3DPaintPipeline:
         if save_glb:
             convert_obj_to_glb(output_mesh_path, output_mesh_path.replace(".obj", ".glb"))
             output_glb_path = output_mesh_path.replace(".obj", ".glb")
-        del self.render
-        self.render = None
         gc.collect()
         torch.cuda.empty_cache()
 
