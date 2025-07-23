@@ -349,7 +349,8 @@ class HunyuanLoraWorker:
         except Exception as e:
             logger.error(f"Generation failed: {e}")
             traceback.print_exc()
-            sys.exit(1)
+            pid = os.getpid()
+            os.kill(pid, signal.SIGKILL)
             raise
 
     def run_hunyuan_pipeline(self, obj_path, reference_image, object_uid, geo_rotation=0):
@@ -498,8 +499,8 @@ async def worker_status():
 @app.post("/quit")
 async def quit():
     """Quit the server"""
-    sys.exit(0)
-
+    pid = os.getpid()
+    os.kill(pid, signal.SIGKILL)    
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

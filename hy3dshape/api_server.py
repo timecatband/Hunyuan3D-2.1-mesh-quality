@@ -258,7 +258,8 @@ app.add_middleware(
 @app.post("/quit")
 async def quit():
     """Quit the server"""
-    sys.exit(1)
+    pid = os.getpid()
+    os.kill(pid, signal.SIGKILL)
 
 @app.post("/generate")
 async def generate(request: Request):
