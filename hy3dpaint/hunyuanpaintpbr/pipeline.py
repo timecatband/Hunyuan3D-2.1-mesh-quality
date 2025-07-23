@@ -771,7 +771,7 @@ class HunyuanPaintPipeline(StableDiffusionPipeline):
                         noise_pred_ref - noise_pred_uncond
                     )
                     noise_pred += 1.0*guidance_scale * view_scale_tensor * (noise_pred_full - noise_pred_ref)
-                    if progress > 0.2:
+                    if progress > 0.3:
                         noise_pred = projected_guidance(noise_pred_uncond, noise_pred_full, 10.0) + 0.1*noise_pred
 
                 if self.do_classifier_free_guidance and self.guidance_rescale > 0.0:
