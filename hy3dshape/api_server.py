@@ -34,6 +34,7 @@ import uvicorn
 from PIL import Image
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, FileResponse
+import gc
 
 from hy3dshape.hy3dshape.rembg import BackgroundRemover
 from hy3dshape.hy3dshape.pipelines import Hunyuan3DDiTFlowMatchingPipeline
@@ -254,9 +255,16 @@ app.add_middleware(
     allow_headers=["*"],  # 允许所有头部
 )
 
+@app.post("/quit")
+async def quit():
+    """Quit the server"""
+    sys.exit(1)
 
 @app.post("/generate")
 async def generate(request: Request):
+    gc.collect()
+    torch.cuda.empty_cache()
+
     logger.info("Worker generating...")
     params = await request.json()
     uid = uuid.uuid4()

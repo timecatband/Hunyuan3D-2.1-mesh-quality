@@ -354,7 +354,6 @@ class HunyuanLoraWorker:
 
     def run_hunyuan_pipeline(self, obj_path, reference_image, object_uid, geo_rotation=0):
         """Run the Hunyuan3D-Paint pipeline to generate textured mesh"""
-        
         # Create output directory
         output_dir = os.path.join(SAVE_DIR, 'results', object_uid)
         os.makedirs(output_dir, exist_ok=True)
@@ -420,6 +419,9 @@ app.add_middleware(
 
 @app.post("/generate_texture")
 async def generate(request: Request):
+    gc.collect()
+    torch.cuda.empty_cache()
+
     """Generate textured GLB from input mesh and reference image"""
     logger.info("Worker generating...")
     params = await request.json()
@@ -492,6 +494,11 @@ async def worker_status():
     """Get worker status including queue length"""
     status = worker.get_status()
     return JSONResponse(status, status_code=200)
+
+@app.post("/quit")
+async def quit():
+    """Quit the server"""
+    sys.exit(0)
 
 
 if __name__ == "__main__":
