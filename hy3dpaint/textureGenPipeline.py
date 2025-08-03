@@ -215,12 +215,6 @@ class Hunyuan3DPaintPipeline:
                 continue
             if material in multiviews_pbr:
                 enhance_images[material] = copy.deepcopy(multiviews_pbr[material])
-                if posterize_color_list is not None:
-                    # Posterize colors if specified
-                    quantize_start_time = time.time()
-                    enhance_images[material] = quantize_texture(enhance_images[material], posterize_color_list)
-                    quantize_end_time = time.time()
-                    print(f"Posterization took {quantize_end_time - quantize_start_time:.2f} seconds")
 
                 
                 
@@ -250,6 +244,12 @@ class Hunyuan3DPaintPipeline:
                         
             ##########  inpaint  ###########
             texture = self.view_processor.texture_inpaint(texture, mask_np)
+            if posterize_color_list is not None:
+                # Posterize colors if specified
+                quantize_start_time = time.time()
+                texture = quantize_texture(texture, posterize_color_list)
+                quantize_end_time = time.time()
+                print(f"Posterization took {quantize_end_time - quantize_start_time:.2f} seconds")
 
 
             self.render.set_texture(texture, force_set=True)
@@ -283,41 +283,64 @@ def quantize_texture(texture, posterize_color_list):
     import torch
     from PIL import Image
 
-    # Detect input type and get H×W×C float32 array in [0,255]
+    # Detect input type
     is_tensor = isinstance(texture, torch.Tensor)
-    is_pil = isinstance(texture, Image.Image)
+    is_pil    = isinstance(texture, Image.Image)
+
+    # --- Tensor branch: use torch.cdist on GPU/CPU ---
     if is_tensor:
-        device = texture.device
-        tex_np = texture.detach().cpu().numpy()
-    elif isinstance(texture, np.ndarray):
-        tex_np = texture
+        t = texture.float()
+        # scale to [0,255]
+        if t.max() <= 1.0:
+            t = t * 255.0
+        h, w, c = t.shape
+        flat = t.view(-1, c)                                    # (N,3)
+        palette = torch.tensor(posterize_color_list, device=t.device, dtype=torch.float32)  # (P,3)
+        # pairwise distances
+        dist = torch.cdist(flat, palette, p=2)                  # (N,P)
+        idx  = dist.argmin(dim=1)
+        quant_flat = palette[idx]                               # (N,3)
+        quant = quant_flat.view(h, w, c)
+        # restore scale
+        if texture.max() <= 1.0:
+            quant = quant / 255.0
+        return quant.to(texture.dtype)
+
+    # --- NumPy / PIL branch ---
+    # to numpy float32 [0,255]
+    if isinstance(texture, np.ndarray):
+        arr = texture
     else:
-        tex_np = np.asarray(texture)
-
-    # Normalize to [0,255]
-    if tex_np.dtype == np.uint8:
-        tex255 = tex_np.astype(np.float32)
+        arr = np.asarray(texture)
+    if arr.dtype == np.uint8:
+        arr255 = arr.astype(np.float32)
     else:
-        tex255 = (tex_np * 255.0).astype(np.float32)
+        arr255 = (arr * 255.0).astype(np.float32)
 
-    h, w, c = tex255.shape
-    palette = np.array(posterize_color_list, dtype=np.float32)  # (P,3)
+    h, w, c = arr255.shape
+    pixels = arr255.reshape(-1, c)                            # (N,3)
 
-    # Flatten and compute distances
-    pixels = tex255.reshape(-1, c)                               # (N,3)
-    diffs = pixels[:, None, :] - palette[None, :, :]             # (N,P,3)
-    dist2 = np.sum(diffs * diffs, axis=2)                        # (N,P)
-    idx = np.argmin(dist2, axis=1)                               # (N,)
+    # try KD‐tree first
+    try:
+        from scipy.spatial import cKDTree
+        tree = cKDTree(posterize_color_list)
+        idx  = tree.query(pixels, k=1)[1]
+    except ImportError:
+        # chunked brute‐force if scipy missing
+        palette = np.array(posterize_color_list, dtype=np.float32)
+        N = pixels.shape[0]
+        idx = np.empty(N, dtype=np.int64)
+        chunk = 100_000
+        for i in range(0, N, chunk):
+            sub = pixels[i:i+chunk]
+            d2 = np.sum((sub[:, None, :] - palette[None, :, :])**2, axis=2)
+            idx[i:i+chunk] = np.argmin(d2, axis=1)
 
-    # Map to nearest palette color
-    quant = palette[idx].reshape(h, w, c)                        # (H,W,3)
+    # map back and normalize
+    quant = np.array(posterize_color_list, dtype=np.float32)[idx].reshape(h, w, c)
     quant_norm = quant / 255.0
 
-    # Return same type as input
-    if is_tensor:
-        return torch.from_numpy(quant_norm).to(device)
-    elif is_pil:
+    if is_pil:
         return Image.fromarray(quant.astype(np.uint8))
     else:
-        return quant_norm
         return quant_norm
