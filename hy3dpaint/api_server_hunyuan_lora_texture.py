@@ -563,7 +563,7 @@ if __name__ == "__main__":
         limit_model_concurrency=args.limit_model_concurrency,
         max_num_view=args.max_num_view,
         resolution=args.resolution,
-        pbr_settings=args.pbr_settings
+        pbr_settings=args.pbr_settings,
         posterize_color_json_file=args.posterize_color_json_file
     )
     
