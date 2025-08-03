@@ -2,8 +2,7 @@
 # except for the third-party components listed below.
 # Hunyuan 3D does not impose any additional limitations beyond what is outlined
 # in the repsective licenses of these third-party components.
-# Users must comply with all terms and conditions of original licenses of these third-party
-# components and must ensure that the usage of the third party components adheres to
+# Users must comply with all terms and conditions of original licenses of these third-party components and must ensure that the usage of the third party components adheres to
 # all relevant laws and regulations.
 
 # For avoidance of doubts, Hunyuan 3D means the large language models and
@@ -278,44 +277,45 @@ def quantize_texture(texture, posterize_color_list):
     if not posterize_color_list:
         return texture
 
-    # Detect type and get a H×W×C float32 NumPy array in [0,255]
+    import numpy as np
+    import torch
+    from PIL import Image
+
+    # Detect input type and get H×W×C float32 array in [0,255]
     is_tensor = isinstance(texture, torch.Tensor)
     is_pil = isinstance(texture, Image.Image)
     if is_tensor:
         device = texture.device
-        np_tex = texture.detach().cpu().numpy()
+        tex_np = texture.detach().cpu().numpy()
     elif isinstance(texture, np.ndarray):
-        np_tex = texture
+        tex_np = texture
     else:
-        # PIL Image
-        np_tex = np.asarray(texture)
+        tex_np = np.asarray(texture)
 
-    # Ensure float32 in [0,255]
-    if np_tex.dtype == np.uint8:
-        tex255 = np_tex.astype(np.float32)
+    # Normalize to [0,255]
+    if tex_np.dtype == np.uint8:
+        tex255 = tex_np.astype(np.float32)
     else:
-        tex255 = np_tex.astype(np.float32) * 255.0
+        tex255 = (tex_np * 255.0).astype(np.float32)
 
     h, w, c = tex255.shape
+    palette = np.array(posterize_color_list, dtype=np.float32)  # (P,3)
 
-    # Build palette array (#colors × 3)
-    palette = np.array(posterize_color_list, dtype=np.float32)
+    # Flatten and compute distances
+    pixels = tex255.reshape(-1, c)                               # (N,3)
+    diffs = pixels[:, None, :] - palette[None, :, :]             # (N,P,3)
+    dist2 = np.sum(diffs * diffs, axis=2)                        # (N,P)
+    idx = np.argmin(dist2, axis=1)                               # (N,)
 
-    # Flatten pixels to (N,3), compute all squared distances to palette at once
-    pixels = tex255.reshape(-1, c)                          # (N,3)
-    diffs = pixels[:, None, :] - palette[None, :, :]        # (N, P, 3)
-    d2 = np.sum(diffs * diffs, axis=2)                      # (N, P)
-    idx = np.argmin(d2, axis=1)                             # (N,)
+    # Map to nearest palette color
+    quant = palette[idx].reshape(h, w, c)                        # (H,W,3)
+    quant_norm = quant / 255.0
 
-    # Map each pixel to nearest palette color and reshape back
-    quant = palette[idx].reshape(h, w, c)                   # (H,W,3)
-    quant_norm = quant / 255.0                              # back to [0,1]
-
-    # Return in original type
+    # Return same type as input
     if is_tensor:
         return torch.from_numpy(quant_norm).to(device)
     elif is_pil:
-        quant_uint8 = (quant * 1.0).astype(np.uint8)
-        return Image.fromarray(quant_uint8)
+        return Image.fromarray(quant.astype(np.uint8))
     else:
+        return quant_norm
         return quant_norm

@@ -247,10 +247,12 @@ class HunyuanLoraWorker:
         except Exception as e:
             logger.error(f"Failed to load JSON file {json_file}: {e}")
             return
-        for group in color_settings.keys():
-            group = color_settings[group]
-            for color in group:
-                colors.append(color["rgb"])
+
+        # Iterate each group dict → each color dict
+        for group in color_settings.values():
+            for color_dict in group.values():
+                colors.append(color_dict["rgb"])
+
         print("Loaded posterize colors from JSON:", colors)
         return colors
 
