@@ -215,6 +215,14 @@ class Hunyuan3DPaintPipeline:
                 continue
             if material in multiviews_pbr:
                 enhance_images[material] = copy.deepcopy(multiviews_pbr[material])
+                if posterize_color_list is not None:
+                    # Posterize colors if specified
+                    quantize_start_time = time.time()
+                    enhance_images[material] = quantize_texture(enhance_images[material], posterize_color_list)
+                    quantize_end_time = time.time()
+                    print(f"Posterization took {quantize_end_time - quantize_start_time:.2f} seconds")
+
+                
                 
                 for i in range(len(enhance_images[material])):
                     enhance_images[material][i] = self.models["super_model"](enhance_images[material][i])
@@ -243,12 +251,6 @@ class Hunyuan3DPaintPipeline:
             ##########  inpaint  ###########
             texture = self.view_processor.texture_inpaint(texture, mask_np)
 
-            if posterize_color_list is not None:
-                # Posterize colors if specified
-                quantize_start_time = time.time()
-                texture = quantize_texture(texture, posterize_color_list)
-                quantize_end_time = time.time()
-                print(f"Posterization took {quantize_end_time - quantize_start_time:.2f} seconds")
 
             self.render.set_texture(texture, force_set=True)
         
