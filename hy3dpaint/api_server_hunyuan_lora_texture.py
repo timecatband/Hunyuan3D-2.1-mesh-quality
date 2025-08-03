@@ -23,6 +23,7 @@ import traceback
 from io import BytesIO
 from pathlib import Path
 from typing import List, Optional
+import json
 
 import torch
 import numpy as np
@@ -193,7 +194,8 @@ class HunyuanLoraWorker:
                  limit_model_concurrency: int = 5,
                  max_num_view: int = 6,
                  resolution: int = 512,
-                 pbr_settings: List[str] = None):
+                 pbr_settings: List[str] = None,
+                 posterize_color_json_file: Optional[str] = None):
         self.worker_id = worker_id
         self.device = device
         self.blender_path = blender_path
@@ -203,6 +205,7 @@ class HunyuanLoraWorker:
         self.max_num_view = max_num_view
         self.resolution = resolution
         self.pbr_settings = pbr_settings or ["albedo"]  # Default to albedo-only
+        self.posterize_color_json_file = posterize_color_json_file
         
         # Set random seeds
         torch.manual_seed(seed)
@@ -227,6 +230,30 @@ class HunyuanLoraWorker:
             self.rembg_session = None
         
         logger.info(f'Total model loading time: {time.time() - total_start_time:.2f} seconds')
+
+        if self.posterize_color_json_file is not None:
+            self.colors = self.load_colors_from_json(self.posterize_color_json_file)
+        else:
+            self.colors = None
+    def load_colors_from_json(self, json_file):
+        colors = []
+        if json_file is None:
+            logger.warning("No JSON file provided for posterize colors.")
+            return
+
+        try:
+            with open(json_file, 'r') as f:
+                color_settings = json.load(f)
+        except Exception as e:
+            logger.error(f"Failed to load JSON file {json_file}: {e}")
+            return
+        for group in color_settings.keys():
+            group = color_settings[group]
+            for color in group:
+                colors.append(color["rgb"])
+        print("Loaded posterize colors from JSON:", colors)
+        return colors
+
 
     def setup_base_pipeline(self):
         """Setup the base Hunyuan3D-Paint pipeline."""
@@ -389,7 +416,8 @@ class HunyuanLoraWorker:
             use_remesh=True,
             save_glb=True,
             learnable_shading_token=self.learnable_shading_token,
-            pbr_settings=self.pbr_settings
+            pbr_settings=self.pbr_settings,
+            posterize_color_list=self.colors,
         )
         
         # Clean up temporary files
@@ -519,6 +547,8 @@ if __name__ == "__main__":
     parser.add_argument("--pbr_settings", nargs="+", default=["albedo"],
                        choices=["albedo", "mr"],
                        help="PBR materials to generate (default: albedo only)")
+    parser.add_argument("--posterize_color_json_file", type=str, default=None,
+                        help="Path to JSON file with posterize color settings")
     args = parser.parse_args()
     
     logger.info(f"args: {args}")
@@ -534,6 +564,7 @@ if __name__ == "__main__":
         max_num_view=args.max_num_view,
         resolution=args.resolution,
         pbr_settings=args.pbr_settings
+        posterize_color_json_file=args.posterize_color_json_file
     )
     
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
@@ -549,7 +580,8 @@ if __name__ == "__main__":
         limit_model_concurrency=args.limit_model_concurrency,
         max_num_view=args.max_num_view,
         resolution=args.resolution,
-        pbr_settings=args.pbr_settings
+        pbr_settings=args.pbr_settings,
+        posterize_color_json_file=args.posterize_color_json_file
     )
     
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")

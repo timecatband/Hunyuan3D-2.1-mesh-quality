@@ -28,6 +28,7 @@ from utils.uvwrap_utils import mesh_uv_wrap
 from DifferentiableRenderer.mesh_utils import convert_obj_to_glb
 import warnings
 import gc
+import time
 
 warnings.filterwarnings("ignore")
 from diffusers.utils import logging as diffusers_logging
@@ -121,7 +122,7 @@ class Hunyuan3DPaintPipeline:
         return estimated_usage
 
     @torch.no_grad()
-    def __call__(self, mesh_path=None, image_path=None, output_mesh_path=None, use_remesh=True, save_glb=True, learnable_shading_token=None, pbr_settings=None):
+    def __call__(self, mesh_path=None, image_path=None, output_mesh_path=None, use_remesh=True, save_glb=True, learnable_shading_token=None, pbr_settings=None, posterize_color_list=None):
         """Generate texture for 3D mesh using multiview diffusion
         
         Args:
@@ -238,9 +239,18 @@ class Hunyuan3DPaintPipeline:
                 enhance_images["albedo"], selected_camera_elevs, selected_camera_azims, selected_view_weights
             )
             mask_np = (mask.squeeze(-1).cpu().numpy() * 255).astype(np.uint8)
-            
+
+                        
             ##########  inpaint  ###########
             texture = self.view_processor.texture_inpaint(texture, mask_np)
+
+            if posterize_color_list is not None:
+                # Posterize colors if specified
+                quantize_start_time = time.time()
+                texture = quantize_texture(texture, posterize_color_list)
+                quantize_end_time = time.time()
+                print(f"Posterization took {quantize_end_time - quantize_start_time:.2f} seconds")
+
             self.render.set_texture(texture, force_set=True)
         
         # Conditionally bake metallic-roughness texture
@@ -262,3 +272,50 @@ class Hunyuan3DPaintPipeline:
         torch.cuda.empty_cache()
 
         return output_mesh_path
+
+def quantize_texture(texture, posterize_color_list):
+    """Posterize texture colors based on a predefined color list."""
+    if not posterize_color_list:
+        return texture
+
+    # Detect type and get a H×W×C float32 NumPy array in [0,255]
+    is_tensor = isinstance(texture, torch.Tensor)
+    is_pil = isinstance(texture, Image.Image)
+    if is_tensor:
+        device = texture.device
+        np_tex = texture.detach().cpu().numpy()
+    elif isinstance(texture, np.ndarray):
+        np_tex = texture
+    else:
+        # PIL Image
+        np_tex = np.asarray(texture)
+
+    # Ensure float32 in [0,255]
+    if np_tex.dtype == np.uint8:
+        tex255 = np_tex.astype(np.float32)
+    else:
+        tex255 = np_tex.astype(np.float32) * 255.0
+
+    h, w, c = tex255.shape
+
+    # Build palette array (#colors × 3)
+    palette = np.array(posterize_color_list, dtype=np.float32)
+
+    # Flatten pixels to (N,3), compute all squared distances to palette at once
+    pixels = tex255.reshape(-1, c)                          # (N,3)
+    diffs = pixels[:, None, :] - palette[None, :, :]        # (N, P, 3)
+    d2 = np.sum(diffs * diffs, axis=2)                      # (N, P)
+    idx = np.argmin(d2, axis=1)                             # (N,)
+
+    # Map each pixel to nearest palette color and reshape back
+    quant = palette[idx].reshape(h, w, c)                   # (H,W,3)
+    quant_norm = quant / 255.0                              # back to [0,1]
+
+    # Return in original type
+    if is_tensor:
+        return torch.from_numpy(quant_norm).to(device)
+    elif is_pil:
+        quant_uint8 = (quant * 1.0).astype(np.uint8)
+        return Image.fromarray(quant_uint8)
+    else:
+        return quant_norm

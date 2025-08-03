@@ -1,0 +1,415 @@
+{
+    "bambu_pla_basic": {
+        "Jade White": {
+            "hex": "#FFFFFF",
+            "color_name": "White",
+            "rgb": [255, 255, 255]
+        },
+        "Beige": {
+            "hex": "#F7E6DE",
+            "color_name": "Misty Rose",
+            "rgb": [247, 230, 222]
+        },
+        "Light Gray": {
+            "hex": "#D1D3D5",
+            "color_name": "Light Gray",
+            "rgb": [209, 211, 213]
+        },
+        "Silver": {
+            "hex": "#A6A9AA",
+            "color_name": "Dark Gray",
+            "rgb": [166, 169, 170]
+        },
+        "Gray": {
+            "hex": "#8E9089",
+            "color_name": "Philippine Gray",
+            "rgb": [142, 144, 137]
+        },
+        "Magenta": {
+            "hex": "#EC008C",
+            "color_name": "Mexican Pink",
+            "rgb": [236, 0, 140]
+        },
+        "Pink": {
+            "hex": "#F55A74",
+            "color_name": "Fiery Rose",
+            "rgb": [245, 90, 116]
+        },
+        "Hot Pink": {
+            "hex": "#F5547C",
+            "color_name": "Watermelon",
+            "rgb": [245, 84, 124]
+        },
+        "Orange": {
+            "hex": "#FF6A13",
+            "color_name": "Pumpkin",
+            "rgb": [255, 106, 19]
+        },
+        "Pumpkin Orange": {
+            "hex": "#FF9016",
+            "color_name": "Beer",
+            "rgb": [255, 144, 22]
+        },
+        "Gold": {
+            "hex": "E4BD68",
+            "color_name": "Middle Yellow Red",
+            "rgb": [228, 189, 104]
+        },
+        "Sunflower Yellow": {
+            "hex": "#FEC600",
+            "color_name": "Golden Poppy",
+            "rgb": [254, 198, 0]
+        },
+        "Yellow": {
+            "hex": "#F4EE2A",
+            "color_name": "Yellow Sun",
+            "rgb": [244, 238, 42]
+        },
+        "Bright Green": {
+            "hex": "#BECF00",
+            "color_name": "Bitter Lemon",
+            "rgb": [190, 207, 0]
+        },
+        "Bambu Green": {
+            "hex": "#00AE42",
+            "color_name": "Green (Pantone)",
+            "rgb": [0, 174, 66]
+        },
+        "Mistletoe Green": {
+            "hex": "#3F8E43",
+            "color_name": "May Green",
+            "rgb": [63, 142, 67]
+        },
+        "Bronze": {
+            "hex": "#847D48",
+            "color_name": "Gold Fusion",
+            "rgb": [132, 125, 72]
+        },
+        "Cocoa Brown": {
+            "hex": "#6F5034",
+            "color_name": "Coffee",
+            "rgb": [111, 80, 52]
+        },
+        "Brown": {
+            "hex": "#9D432C",
+            "color_name": "Chestnut",
+            "rgb": [157, 67, 44]
+        },
+        "Maroon Red": {
+            "hex": "#9D2235",
+            "color_name": "Vivid Burgundy",
+            "rgb": [157, 34, 53]
+        },
+        "Red": {
+            "hex": "#C12E1F",
+            "color_name": "Dark Pastel Red",
+            "rgb": [193, 46, 31]
+        },
+        "Turquoise": {
+            "hex": "#00B1B7",
+            "color_name": "Tiffany Blue",
+            "rgb": [0, 177, 183]
+        },
+        "Cyan": {
+            "hex": "#0086D6",
+            "color_name": "Blue Cola",
+            "rgb": [0, 134, 214]
+        },
+        "Blue": {
+            "hex": "#0A2989",
+            "color_name": "Resolution Blue",
+            "rgb": [10, 41, 137]
+        },
+        "Cobalt Blue": {
+            "hex": "#0056B8",
+            "color_name": "Absolute Zero (Crayola)",
+            "rgb": [0, 86, 184]
+        },
+        "Purple": {
+            "hex": "#5E43B7",
+            "color_name": "Plump Purple",
+            "rgb": [94, 67, 183]
+        },
+        "Indigo Purple": {
+            "hex": "#482960",
+            "color_name": "Jacarta",
+            "rgb": [72, 41, 96]
+        },
+        "Blue Gray": {
+            "hex": "#5B6579",
+            "color_name": "Dark Electric Blue",
+            "rgb": [91, 101, 121]
+        },
+        "Dark Gray": {
+            "hex": "#545454",
+            "color_name": "Davy's Grey",
+            "rgb": [84, 84, 84]
+        },
+        "Black": {
+            "hex": "#000000",
+            "color_name": "Black",
+            "rgb": [0, 0, 0]
+        }
+    },
+    "bambu_pla_matte": {
+        "Ivory White": {
+            "hex": "#FFFFFF",
+            "color_name": "White",
+            "rgb": [255, 255, 255]
+        },
+        "Bone White": {
+            "hex": "#CBC6B8",
+            "color_name": "Pale Silver",
+            "rgb": [203, 198, 184]
+        },
+        "Desert Tan": {
+            "hex": "#E8DBB7",
+            "color_name": "Dutch White",
+            "rgb": [232, 219, 183]
+        },
+        "Latte Brown": {
+            "hex": "#D3B7A7",
+            "color_name": "Dark Vanilla",
+            "rgb": [211, 183, 167]
+        },
+        "Caramel": {
+            "hex": "#AE835B",
+            "color_name": "Bronze (Metallic)",
+            "rgb": [174, 131, 91]
+        },
+        "Terracotta": {
+            "hex": "#B15533",
+            "color_name": "Brown (Crayola)",
+            "rgb": [177, 85, 51]
+        },
+        "Dark Brown": {
+            "hex": "#7D6556",
+            "color_name": "Pastel Brown",
+            "rgb": [125, 101, 86]
+        },
+        "Dark Chocolate": {
+            "hex": "#4D3324",
+            "color_name": "Café Noir",
+            "rgb": [77, 51, 36]
+        },
+        "Lilac Purple": {
+            "hex": "#AE96D4",
+            "color_name": "Light Pastel Purple",
+            "rgb": [174, 150, 212]
+        },
+        "Sakura Pink": {
+            "hex": "#E8AFCF",
+            "color_name": "Pink Pearl",
+            "rgb": [232, 175, 207]
+        },
+        "Mandarin Orange": {
+            "hex": "#F99963",
+            "color_name": "Atomic Tangerine",
+            "rgb": [249, 153, 99]
+        },
+        "Lemon Yellow": {
+            "hex": "#F7D959",
+            "color_name": "Naples Yellow",
+            "rgb": [247, 217, 89]
+        },
+        "Plum": {
+            "hex": "#950051",
+            "color_name": "Rose Garnet",
+            "rgb": [149, 0, 81]
+        },
+        "Scarlet Red": {
+            "hex": "#DE4343",
+            "color_name": "Jasper",
+            "rgb": [222, 67, 67]
+        },
+        "Dark Red": {
+            "hex": "#BB3D43",
+            "color_name": "Watermelon Red",
+            "rgb": [187, 61, 67]
+        },
+        "Dark Green": {
+            "hex": "#68724D",
+            "color_name": "Axolotl",
+            "rgb": [104, 114, 77]
+        },
+        "Grass Green": {
+            "hex": "#61C680",
+            "color_name": "Emerald",
+            "rgb": [97, 198, 128]
+        },
+        "Apple Green": {
+            "hex": "#C2E189",
+            "color_name": "Yellow-Green (Crayola)",
+            "rgb": [194, 225, 137]
+        },
+        "Ice Blue": {
+            "hex": "#A3D8E1",
+            "color_name": "Crystal",
+            "rgb": [163, 216, 225]
+        },
+        "Sky Blue": {
+            "hex": "#56B7E6",
+            "color_name": "Blue Jeans",
+            "rgb": [86, 183, 230]
+        },
+        "Marine Blue": {
+            "hex": "#0078BF",
+            "color_name": "Ocean Boat Blue",
+            "rgb": [0, 120, 191]
+        },
+        "Dark Blue": {
+            "hex": "#042F56",
+            "color_name": "Prussian Blue",
+            "rgb": [4, 47, 86]
+        },
+        "Ash Gray": {
+            "hex": "#9B9EA0",
+            "color_name": "Spanish Gray",
+            "rgb": [155, 158, 160]
+        },
+        "Nardo Gray": {
+            "hex": "#757575",
+            "color_name": "Sonic Silver",
+            "rgb": [117, 117, 117]
+        },
+        "Charcoal Gray": {
+            "hex": "#000000",
+            "color_name": "Black",
+            "rgb": [0, 0, 0]
+        }
+    },
+    "bambu_pla_selected": {
+        "Ivory White": {
+            "hex": "#FFFFFF",
+            "color_name": "White",
+            "rgb": [255, 255, 255]
+        },
+        "Desert Tan": {
+            "hex": "#E8DBB7",
+            "color_name": "Dutch White",
+            "rgb": [232, 219, 183]
+        },
+        "Lilac Purple": {
+            "hex": "#AE96D4",
+            "color_name": "Light Pastel Purple",
+            "rgb": [174, 150, 212]
+        },
+        "Sakura Pink": {
+            "hex": "#E8AFCF",
+            "color_name": "Pink Pearl",
+            "rgb": [232, 175, 207]
+        },
+        "Mandarin Orange": {
+            "hex": "#F99963",
+            "color_name": "Atomic Tangerine",
+            "rgb": [249, 153, 99]
+        },
+        "Lemon Yellow": {
+            "hex": "#F7D959",
+            "color_name": "Naples Yellow",
+            "rgb": [247, 217, 89]
+        },
+        "Plum": {
+            "hex": "#950051",
+            "color_name": "Rose Garnet",
+            "rgb": [149, 0, 81]
+        },
+        "Scarlet Red": {
+            "hex": "#DE4343",
+            "color_name": "Jasper",
+            "rgb": [222, 67, 67]
+        },
+        "Dark Red": {
+            "hex": "#BB3D43",
+            "color_name": "Watermelon Red",
+            "rgb": [187, 61, 67]
+        },
+        "Dark Green": {
+            "hex": "#68724D",
+            "color_name": "Axolotl",
+            "rgb": [104, 114, 77]
+        },
+        "Grass Green": {
+            "hex": "#61C680",
+            "color_name": "Emerald",
+            "rgb": [97, 198, 128]
+        },
+        "Apple Green": {
+            "hex": "#C2E189",
+            "color_name": "Yellow-Green (Crayola)",
+            "rgb": [194, 225, 137]
+        },
+        "Ice Blue": {
+            "hex": "#A3D8E1",
+            "color_name": "Crystal",
+            "rgb": [163, 216, 225]
+        },
+        "Sky Blue": {
+            "hex": "#56B7E6",
+            "color_name": "Blue Jeans",
+            "rgb": [86, 183, 230]
+        },
+        "Marine Blue": {
+            "hex": "#0078BF",
+            "color_name": "Ocean Boat Blue",
+            "rgb": [0, 120, 191]
+        },
+        "Dark Blue": {
+            "hex": "#042F56",
+            "color_name": "Prussian Blue",
+            "rgb": [4, 47, 86]
+        },
+        "Charcoal Gray": {
+            "hex": "#000000",
+            "color_name": "Black",
+            "rgb": [0, 0, 0]
+        },
+        "Black Walnut": {
+            "hex": "#4F3F24",
+            "color_name": "Café Noir",
+            "rgb": [79, 63, 36]
+        },
+        "Clay Brown": {
+            "hex": "#995F11",
+            "color_name": "Golden Brown",
+            "rgb": [153, 95, 17]
+        },
+        "Classic Birch": {
+            "hex": "#918669",
+            "rgb": [145, 134, 105]
+        },
+        "Ochre Yellow": {
+            "hex": "#C98935",
+            "rgb": [201, 137, 53]
+        }
+    },
+    "bambu_pla_wood": {
+        "Black Walnut": {
+            "hex": "#4F3F24",
+            "color_name": "Café Noir",
+            "rgb": [79, 63, 36]
+        },
+        "Rosewood": {
+            "hex": "#4C241C",
+            "color_name": "Caput Mortuum",
+            "rgb": [76, 36, 28]
+        },
+        "Clay Brown": {
+            "hex": "#995F11",
+            "color_name": "Golden Brown",
+            "rgb": [153, 95, 17]
+        },
+        "Classic Birch": {
+            "hex": "#918669",
+            "rgb": [145, 134, 105]
+        },
+        "White Oak": {
+            "hex": "#D6CCA3",
+            "rgb": [214, 204, 163]
+        },
+        "Ochre Yellow": {
+            "hex": "#C98935",
+            "rgb": [201, 137, 53]
+        }
+    }
+}
