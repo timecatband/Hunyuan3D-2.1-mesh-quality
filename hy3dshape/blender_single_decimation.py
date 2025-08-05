@@ -108,10 +108,10 @@ def decimate_mesh(input_path, output_path, target_vtx):
             mod = obj.modifiers.new("Decimate", "DECIMATE")
             mod.decimate_type = 'COLLAPSE'
             
-            try:
-                mod.vertex_count = target_vtx
-            except AttributeError:
-                mod.ratio = target_vtx / vcount
+            #try:
+            #    mod.vertex_count = target_vtx
+            #except AttributeError:
+            mod.ratio = target_vtx / vcount
             
             bpy.ops.object.modifier_apply(modifier=mod.name)
             me.calc_normals_split()
