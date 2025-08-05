@@ -306,8 +306,9 @@ async def generate(request: Request):
     uid = uuid.uuid4()
     try:
         file_path, uid = worker.generate(uid, params)
-        reduced_mesh_path = file_path.replace('.glb', '_reduced.glb')
-        reduce_mesh_blender(file_path, target_vertices=40000, output_path=reduced_mesh_path)
+        #reduced_mesh_path = file_path.replace('.glb', '_reduced.glb')
+        #reduce_mesh_blender(file_path, target_vertices=40000, output_path=reduced_mesh_path)
+        reduced_mesh_path = file_path
         logger.info(f"Generated mesh saved at {reduced_mesh_path}")
         return FileResponse(reduced_mesh_path)
     except ValueError as e:
@@ -317,7 +318,7 @@ async def generate(request: Request):
             "text": server_error_msg,
             "error_code": 1,
         }
-        return JSONResponse(ret, status_code=404)
+        return JSONResponse(ret, status_codetermina=404)
     except torch.cuda.CudaError as e:
         print("Caught torch.cuda.CudaError:", e)
         ret = {
