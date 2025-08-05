@@ -48,6 +48,41 @@ server_error_msg = "**NETWORK ERROR DUE TO HIGH TRAFFIC. PLEASE REGENERATE OR RE
 moderation_msg = "YOUR INPUT VIOLATES OUR CONTENT MODERATION GUIDELINES. PLEASE TRY AGAIN."
 
 handler = None
+import subprocess
+
+def reduce_mesh_blender(input_path, target_vertices=40000, output_path=None, blender_path="/usr/bin/blender"):
+    """Reduce mesh using Blender decimation script"""
+    if output_path is None:
+        name, ext = os.path.splitext(input_path)
+        output_path = f"{name}_reduced.glb"
+    
+    script_path = os.path.join(os.path.dirname(__file__), "blender_single_decimation.py")
+    
+    cmd = [
+        blender_path,
+        "--background",
+        "--python", script_path,
+        "--",
+        input_path,
+        output_path,
+        str(target_vertices)
+    ]
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode == 0:
+            logger.info(f"Blender decimation successful: {output_path}")
+            return output_path
+        else:
+            logger.error(f"Blender decimation failed: {result.stderr}")
+            return input_path
+    except subprocess.TimeoutExpired:
+        logger.error("Blender decimation timed out")
+        return input_path
+    except Exception as e:
+        logger.error(f"Blender decimation error: {e}")
+        return input_path
+
 
 
 def build_logger(logger_name, logger_filename):
@@ -271,7 +306,10 @@ async def generate(request: Request):
     uid = uuid.uuid4()
     try:
         file_path, uid = worker.generate(uid, params)
-        return FileResponse(file_path)
+        reduced_mesh_path = file_path.replace('.glb', '_reduced.glb')
+        reduce_mesh_blender(file_path, target_vertices=40000, output_path=reduced_mesh_path)
+        logger.info(f"Generated mesh saved at {reduced_mesh_path}")
+        return FileResponse(reduced_mesh_path)
     except ValueError as e:
         traceback.print_exc()
         print("Caught ValueError:", e)

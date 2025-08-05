@@ -394,11 +394,12 @@ class HunyuanLoraWorker:
         final_path = os.path.join(glb_output_dir, f'{object_uid}.glb')
         
         # Use Blender decimation to reduce mesh
-        processed_obj_path = reduce_mesh_blender(
-            obj_path, target_vertices=40000,
-            output_path=os.path.join(output_dir, f'{object_uid}_reduced.glb'),
-            blender_path=self.blender_path
-        )
+        #processed_obj_path = reduce_mesh_blender(
+            #obj_path, target_vertices=40000,
+            #output_path=os.path.join(output_dir, f'{object_uid}_reduced.glb'),
+            #blender_path=self.blender_path
+        #)
+        processed_obj_path = obj_path  # Use original path if no reduction is needed
 
         # Save reference image temporarily
         ref_image_path = os.path.join(output_dir, 'reference.png')

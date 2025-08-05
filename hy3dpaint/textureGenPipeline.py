@@ -289,6 +289,7 @@ def quantize_texture(texture, posterize_color_list):
 
     # --- Tensor branch: use torch.cdist on GPU/CPU ---
     if is_tensor:
+        print("Posterizing texture using PyTorch")
         t = texture.float()
         # scale to [0,255]
         if t.max() <= 1.0:
@@ -344,3 +345,4 @@ def quantize_texture(texture, posterize_color_list):
         return Image.fromarray(quant.astype(np.uint8))
     else:
         return quant_norm
+        
