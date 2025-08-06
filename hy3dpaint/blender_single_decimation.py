@@ -84,7 +84,7 @@ def decimate_mesh(input_path, output_path, target_vtx):
         # Repair mesh: remove doubles and fill holes
         bm = bmesh.new()
         bm.from_mesh(me)
-        bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-5)
+        bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-3)
         
         # Fill holes
         holes = [e for e in bm.edges if e.is_boundary]
