@@ -909,8 +909,9 @@ class Hunyuan3DDiTFlowMatchingPipeline(Hunyuan3DDiTPipeline):
                         # Option 1: Inverse compensation
                         adaptive_scale = torch.clamp(natural_strength / (target_strength + 1e-6), min_scale, max_scale)
 
-                        
-                        effective_guidance = guidance_scale#adaptive_scale * guidance_scale
+                        #effective_guidance = guidance_scale
+                        effective_guidance = (1.0-progress)*guidance_scale#adaptive_scale * guidance_scale
+                        #effective_guidance 
                         print(f"Adaptive scale: {adaptive_scale:.3f}, Effective guidance: {effective_guidance:.3f}")
                         diff = noise_pred_cond - noise_pred_uncond
                         noise_pred = noise_pred_uncond + effective_guidance * (diff)
