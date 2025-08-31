@@ -423,14 +423,6 @@ class HunyuanLoraWorker:
             posterize_color_list=self.colors,
         )
         
-        # Clean up temporary files
-        try:
-            os.remove(ref_image_path)
-            if processed_obj_path != obj_path:
-                os.remove(processed_obj_path)
-        except Exception as e:
-            logger.warning(f"Cleanup failed: {e}")
-
         gc.collect()
         torch.cuda.empty_cache()
         
